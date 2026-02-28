@@ -2716,11 +2716,15 @@ name = "pagelens-core"
 version = "0.1.0"
 dependencies = [
  "chromiumoxide",
+ "futures",
+ "regex",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "urlencoding",
+ "which",
 ]
 
 [[package]]
