@@ -57,12 +57,9 @@ async fn can_launch_and_shutdown_browser() {
     // Browser should be connected
     assert!(browser.is_connected(), "Browser should be connected after launch");
     
-    // Explicit shutdown should work
+    // Explicit shutdown should work (consumes browser)
     browser.shutdown().await
         .expect("Should shutdown cleanly");
-    
-    // After shutdown, browser should not be connected
-    assert!(!browser.is_connected(), "Browser should not be connected after shutdown");
 }
 
 #[tokio::test]
@@ -163,7 +160,7 @@ async fn navigation_to_nonexistent_host_fails_gracefully() {
         .expect("Should launch browser");
     
     // This should timeout or fail gracefully
-    let result = browser.navigate("http://localhost:59999").await;
+    let _result = browser.navigate("http://localhost:59999").await;
     // May succeed or fail depending on timeout behavior
     // The important thing is it doesn't panic
     

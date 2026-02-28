@@ -13,6 +13,10 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 chromiumoxide = { workspace = true }
+which = "6"
+futures = "0.3"
+tempfile = "3"
+regex = "1"
 
 [dev-dependencies]
 urlencoding = "2"
