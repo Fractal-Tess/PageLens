@@ -100,7 +100,7 @@ fn my_command(arg: String) -> String {
 3. **Regenerate bindings** (auto on dev build):
 
 ```bash
-pnpm tauri dev
+bun tauri dev
 ```
 
 4. **Use in Svelte**:
