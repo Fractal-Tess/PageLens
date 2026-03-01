@@ -75,8 +75,8 @@ let snapshot = page.snapshot(SnapshotOptions::default()).await?;
 Integration tests require running test-apps:
 
 ```bash
-# Terminal 1: Start test servers
-pnpm run start-test-apps
+# Terminal 1: Start test servers (ask the user if they have already started them for you)
+bun run start-test-apps
 
 # Terminal 2: Run tests (sequential required)
 cargo test -p pagelens-core -- --test-threads=1
