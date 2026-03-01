@@ -12,6 +12,7 @@ repository = "https://github.com/Fractal-Tess/pagelens"
 [workspace.dependencies]
 # Internal crates
 pagelens-core = { path = "crates/pagelens-core" }
+pagelens-db = { path = "crates/pagelens-db" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -24,7 +25,12 @@ thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 
 # Browser automation
-chromiumoxide = { version = "0.7", features = ["tokio-runtime"] }
+chromey = { version = "2.38", default-features = false, features = [
+  "bytes",
+  "default-tls",
+  "serde0"
+] }
+getrandom = "=0.2.15"
 
 # Future crates (noted for later):
 # pagelens-rules  — pluggable rule/check definitions
