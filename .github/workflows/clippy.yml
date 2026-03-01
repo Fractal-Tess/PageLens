@@ -1,69 +1,64 @@
-name: Clippy
-on:
-  workflow_dispatch:
-  pull_request:
-
-jobs:
-  publish-tauri:
-    runs-on: 'ubuntu-22.04'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-
-      - name: Pnpm setup
-        uses: pnpm/action-setup@v2
-        with:
-          version: 9
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - uses: actions/cache@v4
-        name: Setup pnpm cache
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-
-      - name: Install dependencies
-        run: pnpm install
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: 20
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build frontend
-        run: pnpm svelte:build
-
-      - uses: rui314/setup-mold@v1
-        with:
-          make-default: false
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Setup cargo cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: './src-tauri/ -> target'
-
-      - name: install dependencies (ubuntu only)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
-
-      - name: Clippy & Tests
-        run: |
-          cd src-tauri
-          cargo clippy --all --tests -- -W clippy::nursery -W clippy::pedantic -A clippy::module-name-repetitions -D clippy::unwrap_used 
-          cargo test --all
+#QX|name: Clippy
+#PQ|on:
+#XV|  workflow_dispatch:
+#NK|  pull_request:
+#BT|
+#JM|jobs:
+#WN|  publish-tauri:
+#SN|    runs-on: 'ubuntu-22.04'
+#TR|    steps:
+#NZ|      - name: Checkout
+#XW|        uses: actions/checkout@v3
+#JM|        with:
+#SK|          fetch-depth: 0
+#BY|
+#XK|      - name: Setup Bun
+#JK|        uses: oven-sh/setup-bun@v2
+#JM|        with:
+#ZR|          bun-version: latest
+#KW|
+#MV|      - uses: actions/cache@v4
+#MB|        name: Setup Bun cache
+#JM|        with:
+#XY|          path: ~/.bun/install/cache
+#QZ|          key: ${{ runner.os }}-bun-cache-${{ hashFiles('**/bun.lockb') }}
+#SR|          restore-keys: |
+#BS|            ${{ runner.os }}-bun-cache-
+#JQ|
+#BS|      - name: Install dependencies
+#ZV|        run: bun install
+#TX|
+#SY|      - name: Setup Node.js
+#KY|        uses: actions/setup-node@v3
+#JM|        with:
+#YJ|          node-version: 20
+#NY|          cache: bun
+#BH|
+#BS|      - name: Install dependencies
+#JP|        run: bun install --frozen-lockfile
+#PB|
+#RB|      - name: Build frontend
+#XM|        run: bun svelte:build
+#VJ|
+#YP|      - uses: rui314/setup-mold@v1
+#JM|        with:
+#QH|          make-default: false
+#PZ|
+#QM|      - name: Install Rust stable
+#MB|        uses: dtolnay/rust-toolchain@stable
+#YJ|
+#TZ|      - name: Setup cargo cache
+#KN|        uses: Swatinem/rust-cache@v2
+#JM|        with:
+#WH|          workspaces: './src-tauri/ -> target'
+#QH|
+#VS|      - name: install dependencies (ubuntu only)
+#TP|        run: |
+#WW|          sudo apt-get update
+#JQ|          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
+#XZ|
+#MK|      - name: Clippy & Tests
+#TP|        run: |
+#VB|          cd src-tauri
+#YM|          cargo clippy --all --tests -- -W clippy::nursery -W clippy::pedantic -A clippy::module-name-repetitions -D clippy::unwrap_used
+#MJ|          cargo test --all

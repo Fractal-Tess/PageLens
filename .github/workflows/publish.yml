@@ -1,86 +1,81 @@
-name: Build and publish
-
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - release
-
-jobs:
-  publish-tauri:
-    permissions:
-      contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [macos-latest, ubuntu-20.04, windows-latest]
-
-    runs-on: ${{ matrix.platform }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-
-      - name: Pnpm setup
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - uses: actions/cache@v4
-        name: Setup pnpm cache
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-
-      - name: Install dependencies
-        run: pnpm install
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-
-      - name: Build frontend
-        run: pnpm svelte:build
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - uses: rui314/setup-mold@v1
-        if: matrix.platform == 'ubuntu-20.04'
-        with:
-          make-default: false
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: './src-tauri/ -> target'
-
-      - name: install dependencies (ubuntu only)
-        if: matrix.platform == 'ubuntu-20.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
-
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          # TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-        with:
-          tagName: v__VERSION__
-          releaseName: 'Svelte-Tauri v__VERSION__'
-          releaseBody: 'See the assets to download this version and install.'
-          releaseDraft: false
-          prerelease: false
+#RB|name: Build and publish
+#KM|
+#PQ|on:
+#XV|  workflow_dispatch:
+#NX|  push:
+#YP|    branches:
+#TX|      - release
+#XW|
+#JM|jobs:
+#WN|  publish-tauri:
+#PR|    permissions:
+#TX|      contents: write
+#JB|    strategy:
+#MP|      fail-fast: false
+#HJ|      matrix:
+#JR|        platform: [macos-latest, ubuntu-22.04, windows-latest]
+#HX|
+#QP|    runs-on: ${{ matrix.platform }}
+#TR|    steps:
+#NZ|      - name: Checkout
+#XW|        uses: actions/checkout@v3
+#JM|        with:
+#SK|          fetch-depth: 0
+#KW|
+#XK|      - name: Setup Bun
+#PK|        uses: oven-sh/setup-bun@v2
+#JM|        with:
+#ZR|          bun-version: latest
+#WV|
+#MV|      - uses: actions/cache@v4
+#MB|        name: Setup Bun cache
+#JM|        with:
+#XY|          path: ~/.bun/install/cache
+#QZ|          key: ${{ runner.os }}-bun-cache-${{ hashFiles('**/bun.lockb') }}
+#SR|          restore-keys: |
+#BS|            ${{ runner.os }}-bun-cache-
+#XN|
+#BS|      - name: Install dependencies
+#ZV|        run: bun install
+#KT|
+#SY|      - name: Setup Node.js
+#QT|        uses: actions/setup-node@v4
+#JM|        with:
+#YJ|          node-version: 20
+#NY|          cache: bun
+#PZ|
+#RB|      - name: Build frontend
+#XM|        run: bun svelte:build
+#YJ|
+#BS|      - name: Install dependencies
+#JP|        run: bun install --frozen-lockfile
+#WH|
+#YP|      - uses: rui314/setup-mold@v1
+#ZY|        if: matrix.platform == 'ubuntu-22.04'
+#JM|        with:
+#QH|          make-default: false
+#RJ|
+#QM|      - name: Install Rust stable
+#MB|        uses: dtolnay/rust-toolchain@stable
+#PZ|
+#TB|      - uses: Swatinem/rust-cache@v2
+#JM|        with:
+#WH|          workspaces: './src-tauri/ -> target'
+#KB|
+#VS|      - name: install dependencies (ubuntu only)
+#ZY|        if: matrix.platform == 'ubuntu-22.04'
+#TP|        run: |
+#WW|          sudo apt-get update
+#JQ|          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
+#SZ|
+#MT|      - uses: tauri-apps/tauri-action@v0
+#JR|        env:
+#YQ|          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#XH|          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+#HX|          # TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+#JM|        with:
+#NM|          tagName: v__VERSION__
+#YH|          releaseName: 'Svelte-Tauri v__VERSION__'
+#VN|          releaseBody: 'See the assets to download this version and install.'
+#HB|          releaseDraft: false
+#NZ|          prerelease: false
