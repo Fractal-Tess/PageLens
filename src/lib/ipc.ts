@@ -16,6 +16,105 @@ async storeSetKey(key: string, value: string) : Promise<void> {
 },
 async storeReadKey(key: string) : Promise<string | null> {
     return await TAURI_INVOKE("store_read_key", { key });
+},
+/**
+ * Analyze a single URL and store the result.
+ */
+async analyzeUrl(input: AnalyzeUrlInput) : Promise<Result<AnalysisResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("analyze_url", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Crawl a URL and store the result.
+ */
+async crawlUrl(input: CrawlUrlInput) : Promise<Result<AnalysisResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("crawl_url", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * List all analysis history items.
+ */
+async listHistory(limit: number | null, offset: number | null) : Promise<Result<HistoryListItem[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_history", { limit, offset }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get a single history item by ID.
+ */
+async getHistoryItem(id: string) : Promise<Result<AnalysisRun, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_history_item", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Update a history item (e.g., rename).
+ */
+async updateHistoryItem(id: string, input: UpdateAnalysisRun) : Promise<Result<AnalysisRun, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_history_item", { id, input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Delete a single history item.
+ */
+async deleteHistoryItem(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_history_item", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Delete all history items.
+ */
+async deleteAllHistory() : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_all_history") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Export history to a JSON file.
+ */
+async exportHistory(path: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("export_history", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Import history from a JSON file.
+ */
+async importHistory(path: string) : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("import_history", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -23,8 +122,10 @@ async storeReadKey(key: string) : Promise<string | null> {
 
 
 export const events = __makeEvents__<{
+analysisProgressEvent: AnalysisProgressEvent,
 exampleEvent: ExampleEvent
 }>({
+analysisProgressEvent: "analysis-progress-event",
 exampleEvent: "example-event"
 })
 
@@ -34,7 +135,105 @@ exampleEvent: "example-event"
 
 /** user-defined types **/
 
+/**
+ * Event emitted during analysis progress.
+ */
+export type AnalysisProgressEvent = { stage: string; message: string; progress: number | null }
+/**
+ * Result of single page analysis.
+ */
+export type AnalysisResult = { run: AnalysisRun }
+/**
+ * Represents a single analysis run stored in the database.
+ */
+export type AnalysisRun = { 
+/**
+ * Unique identifier for this run.
+ */
+id: string; 
+/**
+ * The URL that was analyzed.
+ */
+url: string; 
+/**
+ * When the analysis was performed.
+ */
+created_at: string; 
+/**
+ * User-provided name for this run (optional).
+ */
+name: string | null; 
+/**
+ * Analysis type: "single" for single page, "crawl" for multi-page.
+ */
+analysis_type: AnalysisType; 
+/**
+ * The complete analysis payload as JSON string.
+ * For single page: contains snapshot + SEO report.
+ * For crawl: contains CrawlResult.
+ */
+payload_json: string; 
+/**
+ * Summary statistics for quick display.
+ */
+summary: AnalysisSummary }
+/**
+ * Summary statistics for quick display in history list.
+ */
+export type AnalysisSummary = { 
+/**
+ * Overall SEO score (0-100) if available.
+ */
+seo_score: number | null; 
+/**
+ * Number of pages analyzed (1 for single, N for crawl).
+ */
+page_count: number; 
+/**
+ * Total number of issues found.
+ */
+total_issues: number; 
+/**
+ * Number of errors.
+ */
+error_count: number; 
+/**
+ * Number of warnings.
+ */
+warning_count: number; 
+/**
+ * Duration of analysis in milliseconds.
+ */
+duration_ms: number }
+/**
+ * Type of analysis performed.
+ */
+export type AnalysisType = "single" | "crawl"
+/**
+ * Input for single page analysis.
+ */
+export type AnalyzeUrlInput = { url: string; name: string | null; options: SnapshotOptionsInput | null }
+/**
+ * Crawl options input.
+ */
+export type CrawlOptionsInput = { max_pages: number; max_depth: number; follow_external_links: boolean; same_subdomain_only: boolean; page_timeout_ms: number; delay_ms: number; max_concurrency: number }
+/**
+ * Input for crawl analysis.
+ */
+export type CrawlUrlInput = { url: string; name: string | null; options: CrawlOptionsInput | null }
 export type ExampleEvent = string
+/**
+ * List item for history (lighter weight than full AnalysisRun).
+ */
+export type HistoryListItem = { id: string; url: string; created_at: string; name: string | null; analysis_type: AnalysisType; summary: AnalysisSummary }
+/**
+ * Snapshot options input.
+ */
+export type SnapshotOptionsInput = { include_html: boolean; include_accessibility_tree: boolean; include_performance_timing: boolean; include_computed_styles: boolean }
+/**
+ * Input for updating an analysis run's name.
+ */
+export type UpdateAnalysisRun = { name: string | null }
 
 /** tauri-specta globals **/
 

@@ -4,11 +4,15 @@
   import Home from '$lib/router/routes/Home.svelte'
   import IPC from '$lib/router/routes/IPC.svelte'
   import Versions from '$router/routes/Versions.svelte'
+  import Analysis from '$lib/router/routes/Analysis.svelte'
+  import History from '$lib/router/routes/History.svelte'
 
   const routes = {
     '/': Home,
     '/#ipc': IPC,
-    '/#versions': Versions
+    '/#versions': Versions,
+    '/#analysis': Analysis,
+    '/#history': History
   }
 </script>
 
