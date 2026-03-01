@@ -2,6 +2,9 @@
 
 use crate::prelude::*;
 use crate::browser::Page;
+use scraper::{Html, Selector};
+use std::collections::HashSet;
+use url::Url;
 
 /// Options for capturing a page snapshot.
 #[derive(Debug, Clone)]
@@ -53,6 +56,8 @@ pub struct PerformanceTiming {
     pub load_complete: Option<u64>,
     /// Time to first byte (TTFB) in milliseconds.
     pub response_start: Option<u64>,
+    pub first_paint: Option<u64>,
+    pub first_contentful_paint: Option<u64>,
 }
 
 /// Computed style information for an element.
@@ -70,6 +75,19 @@ pub struct ComputedStyle {
     pub font_weight: Option<String>,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CaptureIssue {
+    pub stage: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ReferencedAssets {
+    pub javascript: Vec<String>,
+    pub stylesheets: Vec<String>,
+    pub media: Vec<String>,
+}
+
 /// A comprehensive snapshot of a web page.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Snapshot {
@@ -85,6 +103,8 @@ pub struct Snapshot {
     pub performance_timing: PerformanceTiming,
     /// Computed styles for visible elements (if requested).
     pub computed_styles: Vec<ComputedStyle>,
+    pub referenced_assets: ReferencedAssets,
+    pub capture_issues: Vec<CaptureIssue>,
 }
 
 impl Snapshot {
@@ -101,8 +121,12 @@ impl Snapshot {
                 dom_content_loaded: None,
                 load_complete: None,
                 response_start: None,
+                first_paint: None,
+                first_contentful_paint: None,
             },
             computed_styles: Vec::new(),
+            referenced_assets: ReferencedAssets::default(),
+            capture_issues: Vec::new(),
         }
     }
 }
@@ -110,7 +134,7 @@ impl Snapshot {
 /// Extension trait for Page to add snapshot functionality.
 pub trait SnapshotExt {
     /// Capture a snapshot of the current page state.
-    async fn snapshot(&self, options: SnapshotOptions) -> Result<Snapshot>;
+    fn snapshot(&self, options: SnapshotOptions) -> impl std::future::Future<Output = Result<Snapshot>> + Send;
 }
 
 impl SnapshotExt for Page {
@@ -123,25 +147,145 @@ impl SnapshotExt for Page {
         // Capture HTML if requested
         if options.include_html {
             snapshot.html = self.html().await?;
+            snapshot.referenced_assets = extract_referenced_assets(&snapshot.html, &snapshot.url);
         }
         
         // Capture accessibility tree if requested
         if options.include_accessibility_tree {
-            snapshot.accessibility_tree = capture_accessibility_tree(self).await?;
+            match capture_accessibility_tree(self).await {
+                Ok(tree) => snapshot.accessibility_tree = tree,
+                Err(err) => snapshot.capture_issues.push(CaptureIssue {
+                    stage: "accessibility_tree".to_string(),
+                    message: err.to_string(),
+                }),
+            }
         }
         
         // Capture performance timing if requested
         if options.include_performance_timing {
-            snapshot.performance_timing = capture_performance_timing(self).await?;
+            match capture_performance_timing(self).await {
+                Ok(timing) => snapshot.performance_timing = timing,
+                Err(err) => snapshot.capture_issues.push(CaptureIssue {
+                    stage: "performance_timing".to_string(),
+                    message: err.to_string(),
+                }),
+            }
         }
         
         // Capture computed styles if requested
         if options.include_computed_styles {
-            snapshot.computed_styles = capture_computed_styles(self).await?;
+            match capture_computed_styles(self).await {
+                Ok(styles) => snapshot.computed_styles = styles,
+                Err(err) => snapshot.capture_issues.push(CaptureIssue {
+                    stage: "computed_styles".to_string(),
+                    message: err.to_string(),
+                }),
+            }
         }
         
         Ok(snapshot)
     }
+}
+
+fn extract_referenced_assets(html: &str, page_url: &str) -> ReferencedAssets {
+    let document = Html::parse_document(html);
+    let base = Url::parse(page_url).ok();
+
+    let mut javascript = Vec::new();
+    let mut js_seen = HashSet::new();
+
+    if let Ok(script_selector) = Selector::parse("script[src]") {
+        for el in document.select(&script_selector) {
+            if let Some(src) = el.value().attr("src") {
+                push_asset(&mut javascript, &mut js_seen, src, base.as_ref());
+            }
+        }
+    }
+
+    if let Ok(modulepreload_selector) = Selector::parse(r#"link[rel="modulepreload"][href]"#) {
+        for el in document.select(&modulepreload_selector) {
+            if let Some(href) = el.value().attr("href") {
+                push_asset(&mut javascript, &mut js_seen, href, base.as_ref());
+            }
+        }
+    }
+
+    let mut stylesheets = Vec::new();
+    let mut css_seen = HashSet::new();
+
+    if let Ok(stylesheet_selector) = Selector::parse(r#"link[rel="stylesheet"][href]"#) {
+        for el in document.select(&stylesheet_selector) {
+            if let Some(href) = el.value().attr("href") {
+                push_asset(&mut stylesheets, &mut css_seen, href, base.as_ref());
+            }
+        }
+    }
+
+    let mut media = Vec::new();
+    let mut media_seen = HashSet::new();
+    let media_selectors = [
+        "img[src]",
+        "img[srcset]",
+        "source[src]",
+        "source[srcset]",
+        "video[src]",
+        "audio[src]",
+    ];
+
+    for pattern in media_selectors {
+        if let Ok(selector) = Selector::parse(pattern) {
+            for el in document.select(&selector) {
+                if let Some(src) = el.value().attr("src") {
+                    push_asset(&mut media, &mut media_seen, src, base.as_ref());
+                }
+                if let Some(srcset) = el.value().attr("srcset") {
+                    for candidate in parse_srcset_urls(srcset) {
+                        push_asset(&mut media, &mut media_seen, &candidate, base.as_ref());
+                    }
+                }
+            }
+        }
+    }
+
+    ReferencedAssets {
+        javascript,
+        stylesheets,
+        media,
+    }
+}
+
+fn parse_srcset_urls(srcset: &str) -> Vec<String> {
+    srcset
+        .split(',')
+        .filter_map(|entry| entry.split_whitespace().next())
+        .filter(|candidate| !candidate.is_empty())
+        .map(std::string::ToString::to_string)
+        .collect()
+}
+
+fn push_asset(collection: &mut Vec<String>, seen: &mut HashSet<String>, raw: &str, base: Option<&Url>) {
+    if raw.is_empty() || raw.starts_with("data:") || raw.starts_with("javascript:") {
+        return;
+    }
+
+    let normalized = normalize_asset_url(raw, base);
+    if seen.insert(normalized.clone()) {
+        collection.push(normalized);
+    }
+}
+
+fn normalize_asset_url(raw: &str, base: Option<&Url>) -> String {
+    if let Ok(parsed) = Url::parse(raw) {
+        return parsed.to_string();
+    }
+
+    if let Some(base_url) = base {
+        if let Ok(joined) = base_url.join(raw) {
+            return joined.to_string();
+        }
+    }
+
+    raw.to_string()
 }
 
 /// Capture the accessibility tree from the page.
@@ -229,64 +373,82 @@ async fn capture_accessibility_tree(page: &Page) -> Result<Vec<AccessibilityNode
         })()
     "#;
     
-    if let Some(cdp_page) = page.cdp_page() {
-        match cdp_page.evaluate(js).await {
-            Ok(result) => {
-                if let Ok(json_str) = result.into_value::<String>() {
-                    if let Ok(nodes) = serde_json::from_str::<Vec<AccessibilityNode>>(&json_str) {
-                        return Ok(nodes);
-                    }
-                }
-            }
-            Err(_) => {
-                // Fallback to empty tree on error
-            }
-        }
-    }
-    
-    Ok(Vec::new())
+    let cdp_page = page
+        .cdp_page()
+        .ok_or_else(|| Error::ExtractionFailed("CDP page unavailable".to_string()))?;
+
+    let result = cdp_page
+        .evaluate(js)
+        .await
+        .map_err(|e| Error::ExtractionFailed(format!("Accessibility evaluation failed: {e}")))?;
+
+    let json_str = result
+        .into_value::<String>()
+        .map_err(|e| Error::ExtractionFailed(format!("Accessibility result decode failed: {e}")))?;
+
+    serde_json::from_str::<Vec<AccessibilityNode>>(&json_str)
+        .map_err(|e| Error::ExtractionFailed(format!("Accessibility JSON parse failed: {e}")))
 }
 
 /// Capture performance timing metrics.
 async fn capture_performance_timing(page: &Page) -> Result<PerformanceTiming> {
     let js = r#"
         (function() {
+            const origin = performance.timeOrigin || 0;
+            const paintEntries = performance.getEntriesByType('paint') || [];
+            const firstPaint = paintEntries.find(e => e.name === 'first-paint');
+            const firstContentfulPaint = paintEntries.find(e => e.name === 'first-contentful-paint');
+            const entry = performance.getEntriesByType('navigation')[0];
+            if (entry) {
+                return JSON.stringify({
+                    navigation_start: Math.round(origin + entry.startTime),
+                    dom_interactive: entry.domInteractive ? Math.round(origin + entry.domInteractive) : null,
+                    dom_content_loaded: entry.domContentLoadedEventEnd ? Math.round(origin + entry.domContentLoadedEventEnd) : null,
+                    load_complete: entry.loadEventEnd ? Math.round(origin + entry.loadEventEnd) : null,
+                    response_start: entry.responseStart ? Math.round(origin + entry.responseStart) : null,
+                    first_paint: firstPaint ? Math.round(origin + firstPaint.startTime) : null,
+                    first_contentful_paint: firstContentfulPaint ? Math.round(origin + firstContentfulPaint.startTime) : null
+                });
+            }
+
+            // Fallback to legacy performance.timing
             const timing = performance.timing;
             return JSON.stringify({
                 navigation_start: timing.navigationStart,
                 dom_interactive: timing.domInteractive || null,
                 dom_content_loaded: timing.domContentLoadedEventEnd || null,
                 load_complete: timing.loadEventEnd || null,
-                response_start: timing.responseStart || null
+                response_start: timing.responseStart || null,
+                first_paint: firstPaint ? Math.round(origin + firstPaint.startTime) : null,
+                first_contentful_paint: firstContentfulPaint ? Math.round(origin + firstContentfulPaint.startTime) : null
             });
         })()
     "#;
     
-    if let Some(cdp_page) = page.cdp_page() {
-        match cdp_page.evaluate(js).await {
-            Ok(result) => {
-                if let Ok(json_str) = result.into_value::<String>() {
-                    if let Ok(timing) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                        return Ok(PerformanceTiming {
-                            navigation_start: timing["navigation_start"].as_u64().unwrap_or(0),
-                            dom_interactive: timing["dom_interactive"].as_u64(),
-                            dom_content_loaded: timing["dom_content_loaded"].as_u64(),
-                            load_complete: timing["load_complete"].as_u64(),
-                            response_start: timing["response_start"].as_u64(),
-                        });
-                    }
-                }
-            }
-            Err(_) => {}
-        }
-    }
-    
+    let cdp_page = page
+        .cdp_page()
+        .ok_or_else(|| Error::ExtractionFailed("CDP page unavailable".to_string()))?;
+
+    let result = cdp_page
+        .evaluate(js)
+        .await
+        .map_err(|e| Error::ExtractionFailed(format!("Performance evaluation failed: {e}")))?;
+
+    let json_str = result
+        .into_value::<String>()
+        .map_err(|e| Error::ExtractionFailed(format!("Performance result decode failed: {e}")))?;
+
+    let timing = serde_json::from_str::<serde_json::Value>(&json_str)
+        .map_err(|e| Error::ExtractionFailed(format!("Performance JSON parse failed: {e}")))?;
+
     Ok(PerformanceTiming {
-        navigation_start: 0,
-        dom_interactive: None,
-        dom_content_loaded: None,
-        load_complete: None,
-        response_start: None,
+        navigation_start: timing["navigation_start"].as_u64().unwrap_or(0),
+        dom_interactive: timing["dom_interactive"].as_u64(),
+        dom_content_loaded: timing["dom_content_loaded"].as_u64(),
+        load_complete: timing["load_complete"].as_u64(),
+        response_start: timing["response_start"].as_u64(),
+        first_paint: timing["first_paint"].as_u64(),
+        first_contentful_paint: timing["first_contentful_paint"].as_u64(),
     })
 }
 
@@ -296,6 +458,38 @@ async fn capture_computed_styles(page: &Page) -> Result<Vec<ComputedStyle>> {
         (function() {
             const styles = [];
             const elements = document.querySelectorAll('p, h1, h2, h3, h4, h5, h6, a, button, span, div');
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+
+            function normalizeColor(value) {
+                if (!ctx || !value) return null;
+                try {
+                    ctx.fillStyle = '#000';
+                    ctx.fillStyle = value;
+                    return ctx.fillStyle || null;
+                } catch (_) {
+                    return null;
+                }
+            }
+
+            function isTransparent(value) {
+                if (!value) return true;
+                const normalized = normalizeColor(value) || value;
+                return normalized === 'transparent' || normalized === 'rgba(0, 0, 0, 0)';
+            }
+
+            function effectiveBackground(el) {
+                let current = el;
+                while (current) {
+                    const computed = window.getComputedStyle(current);
+                    const candidate = normalizeColor(computed.backgroundColor);
+                    if (candidate && !isTransparent(candidate)) {
+                        return candidate;
+                    }
+                    current = current.parentElement;
+                }
+                return 'rgb(255, 255, 255)';
+            }
             
             elements.forEach((el, index) => {
                 const computed = window.getComputedStyle(el);
@@ -306,8 +500,8 @@ async fn capture_computed_styles(page: &Page) -> Result<Vec<ComputedStyle>> {
                     styles.push({
                         selector: el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + 
                                   (el.className ? '.' + el.className.split(' ').join('.') : ''),
-                        color: computed.color || null,
-                        background_color: computed.backgroundColor || null,
+                        color: normalizeColor(computed.color) || computed.color || null,
+                        background_color: effectiveBackground(el),
                         font_size: computed.fontSize || null,
                         font_weight: computed.fontWeight || null
                     });
@@ -318,26 +512,89 @@ async fn capture_computed_styles(page: &Page) -> Result<Vec<ComputedStyle>> {
         })()
     "#;
     
-    if let Some(cdp_page) = page.cdp_page() {
-        match cdp_page.evaluate(js).await {
-            Ok(result) => {
-                if let Ok(json_str) = result.into_value::<String>() {
-                    if let Ok(styles) = serde_json::from_str::<Vec<ComputedStyle>>(&json_str) {
-                        return Ok(styles);
-                    }
-                }
-            }
-            Err(_) => {}
-        }
-    }
-    
-    Ok(Vec::new())
+    let cdp_page = page
+        .cdp_page()
+        .ok_or_else(|| Error::ExtractionFailed("CDP page unavailable".to_string()))?;
+
+    let result = cdp_page
+        .evaluate(js)
+        .await
+        .map_err(|e| Error::ExtractionFailed(format!("Computed styles evaluation failed: {e}")))?;
+
+    let json_str = result
+        .into_value::<String>()
+        .map_err(|e| Error::ExtractionFailed(format!("Computed styles result decode failed: {e}")))?;
+
+    serde_json::from_str::<Vec<ComputedStyle>>(&json_str)
+        .map_err(|e| Error::ExtractionFailed(format!("Computed styles JSON parse failed: {e}")))
 }
 
 /// Internal extension to access the underlying CDP page
 impl Page {
-    /// Get access to the underlying chromiumoxide page (internal use only).
+    /// Get access to the underlying chrome page (internal use only).
     pub(crate) fn cdp_page(&self) -> Option<&chromiumoxide::Page> {
         self.cdp_page.as_ref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_js_css_and_media_assets() {
+        let html = r#"
+            <html>
+              <head>
+                <script src="/assets/app.js"></script>
+                <link rel="modulepreload" href="./chunk.js">
+                <link rel="stylesheet" href="/assets/app.css">
+              </head>
+              <body>
+                <img src="/img/hero.jpg" />
+                <source srcset="/img/hero-1x.jpg 1x, /img/hero-2x.jpg 2x" />
+              </body>
+            </html>
+        "#;
+
+        let assets = extract_referenced_assets(html, "https://example.com/page");
+
+        assert!(assets
+            .javascript
+            .contains(&"https://example.com/assets/app.js".to_string()));
+        assert!(assets
+            .javascript
+            .contains(&"https://example.com/chunk.js".to_string()));
+        assert!(assets
+            .stylesheets
+            .contains(&"https://example.com/assets/app.css".to_string()));
+        assert!(assets
+            .media
+            .contains(&"https://example.com/img/hero.jpg".to_string()));
+        assert!(assets
+            .media
+            .contains(&"https://example.com/img/hero-1x.jpg".to_string()));
+    }
+
+    #[test]
+    fn deduplicates_assets_and_ignores_data_urls() {
+        let html = r#"
+            <html>
+              <head>
+                <script src="/assets/app.js"></script>
+                <script src="/assets/app.js"></script>
+              </head>
+              <body>
+                <img src="data:image/png;base64,abc" />
+                <img src="/img/one.png" />
+                <img src="/img/one.png" />
+              </body>
+            </html>
+        "#;
+
+        let assets = extract_referenced_assets(html, "https://example.com");
+
+        assert_eq!(assets.javascript.len(), 1);
+        assert_eq!(assets.media, vec!["https://example.com/img/one.png".to_string()]);
     }
 }
