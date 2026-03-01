@@ -19,41 +19,37 @@ PageLens is a monorepo containing:
 
 - **Frontend**: TypeScript, Svelte, Tailwind CSS, shadcn-svelte
 - **Backend**: Rust, Tauri
-- **Build**: Vite, pnpm, Turbo
+- **Build**: Vite, Bun, Turbo
 - **Testing**: Rust test suite with real application integration tests
 
 ## Quick Start
 
 ### Prerequisites
 
-- [pnpm](https://pnpm.io/) >= 9.0.0
+- [Bun](https://bun.sh/) >= 1.3.0
 - [Node.js](https://nodejs.org/) >= 20.0.0
 - [Rust](https://rustup.rs/)
-- [just](https://just.systems/) (optional task runner)
 
 ### Installation
 
 ```bash
 # Install dependencies
-pnpm install
+bun install
 
 # Build test applications
-pnpm turbo run build --filter="./test-apps/*"
+bun turbo run build --filter="./test-apps/*"
 ```
 
 ### Development
 
 ```bash
 # Run the main Tauri application
-pnpm tauri dev
-
-# Or using just
-just tauri-dev
+bun tauri dev
 ```
 
 ## Monorepo Structure
 
-This is a monorepo using **pnpm workspaces** and **Turbo**.
+This is a monorepo using **Bun** and **Turbo**.
 
 ```
 pagelens/
@@ -67,7 +63,7 @@ pagelens/
 ├── src/                        # Main Svelte app source
 ├── src-tauri/                  # Tauri Rust source
 ├── package.json                # Root workspace
-├── pnpm-workspace.yaml         # Workspace config
+├── bun.lockb                   # Lockfile
 └── turbo.json                  # Turbo config
 ```
 
@@ -81,40 +77,27 @@ Run tests against real production applications:
 
 ```bash
 # Full automated test (builds, serves, tests)
-just test-full
+bun run test:integration
 
 # Or manually:
-just prod                    # Terminal 1: Start servers
-just test-integration        # Terminal 2: Run tests
+bun run prod                    # Terminal 1: Start servers
+bun run test:integration        # Terminal 2: Run tests
 ```
 
 ### Unit Tests
 
 ```bash
 # Rust core tests
-just cargo-test
+cargo test -p pagelens-core -- --test-threads=1
 ```
 
 ## Available Scripts
 
-### Using pnpm
-
 ```bash
-pnpm install                      # Install dependencies
-pnpm turbo run build             # Build all packages
-pnpm run prod                    # Start test servers
-pnpm run test:integration        # Run integration tests
-```
-
-### Using just
-
-```bash
-just                             # Show all commands
-just install                     # Install dependencies
-just turbo-build                 # Build with Turbo
-just prod                        # Production test servers
-just test-full                   # Full integration test
-just clean                       # Clean all artifacts
+bun install                      # Install dependencies
+bun turbo run build             # Build all packages
+bun run prod                    # Start test servers
+bun run test:integration        # Run integration tests
 ```
 
 ## Requirements
