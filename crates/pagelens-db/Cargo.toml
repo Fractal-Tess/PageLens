@@ -1,0 +1,26 @@
+[package]
+name = "pagelens-db"
+description = "PageLens database layer for analysis history persistence"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Workspace dependencies
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled", "chrono", "uuid"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+
+# Types
+specta = { version = "2.0.0-rc.21", features = ["chrono", "derive"] }
+
+[dev-dependencies]
+tempfile = "3"
