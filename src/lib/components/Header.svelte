@@ -23,6 +23,14 @@
       href: '/'
     },
     {
+      label: 'Analysis',
+      href: '/#analysis'
+    },
+    {
+      label: 'History',
+      href: '/#history'
+    },
+    {
       label: 'IPC',
       href: '/#IPC'
     },
