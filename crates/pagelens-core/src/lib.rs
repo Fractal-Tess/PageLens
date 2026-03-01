@@ -1,10 +1,17 @@
 pub mod browser;
+pub mod crawl;
 pub mod error;
 pub mod seo;
+pub mod site_files;
 pub mod snapshot;
 mod prelude;
 
 pub use browser::{Browser, ChromiumLocator, Page};
+pub use crawl::{CrawlOptions, CrawlResult, CrawledPage, Crawler};
 pub use error::Error;
-pub use seo::{SeoAnalyzer, SeoReport, Severity, Issue};
-pub use snapshot::{Snapshot, SnapshotOptions, SnapshotExt};
+pub use seo::{Issue, ScoreConfig, SeoAnalyzer, SeoReport, Severity};
+pub use site_files::{
+    MiscFileReport, RobotsReport, SiteFileIssue, SiteFilesAnalyzer, SiteFilesReport,
+    SitemapCrawlDiff, SitemapKind, SitemapReport,
+};
+pub use snapshot::{ReferencedAssets, Snapshot, SnapshotExt, SnapshotOptions};
