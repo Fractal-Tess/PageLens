@@ -13,3 +13,17 @@ node_modules
 
 # Direnv
 .direnv
+
+# Turbo
+.turbo
+
+# pnpm
+.pnpm-store
+
+# Test server PIDs
+test-apps/.prod-servers.pid
+test-apps/.dev-servers.pid
+test-apps/.test-servers.pid
+
+# Development artifacts
+.sisyphus/

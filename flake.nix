@@ -5,9 +5,10 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     systems.url = "github:nix-systems/default-linux";
     playwright.url = "github:pietdevries94/playwright-web-flake";
+    rust-overlay.url = "github:oxalica/rust-overlay";
   };
 
-  outputs = { nixpkgs, systems, playwright, ... }@inputs:
+  outputs = { nixpkgs, systems, playwright, rust-overlay, ... }@inputs:
     let
       eachSystem = f:
         nixpkgs.lib.genAttrs (import systems) (system:
@@ -17,7 +18,7 @@
             };
             pkgs = import nixpkgs {
               inherit system;
-              overlays = [ overlay ];
+              overlays = [ rust-overlay.overlays.default overlay ];
             };
           in
           f pkgs
@@ -49,9 +50,11 @@
           webkitgtk_4_1.dev
           librsvg
           clang
-          cargo
-          rustc
-          rustfmt
+
+          # Rust toolchain via rust-overlay (1.85+ for Edition 2024 support)
+          (rust-bin.stable.latest.default.override {
+            extensions = [ "rust-src" "rustfmt" ];
+          })
 
           bun
           prettierd
@@ -78,7 +81,7 @@
                        /____/
             PageLens Development Environment
             Bun - $(${pkgs.bun}/bin/bun --version)
-            Rustc - $(${pkgs.rustc}/bin/rustc --version)
+            Rustc - $(rustc --version)
             Chromium - $(ls -d ${pkgs.playwright-driver.browsers}/chromium-* 2>/dev/null | head -1 | xargs basename || echo "not found")
             " | lolcat
 
