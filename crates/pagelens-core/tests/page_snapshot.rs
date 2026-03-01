@@ -4,187 +4,157 @@
 //! - can_capture_accessibility_tree — Gets the a11y tree from CDP
 //! - can_capture_performance_timing — Gets navigation timing metrics
 //! - can_capture_computed_styles — Extracts styles for contrast checking
+//!
+//! These tests use the running test applications instead of embedded HTML.
+//! Run `bun run start-test-apps` from the project root before running tests.
 
-use pagelens_core::browser::Browser;
+mod common;
+
 use pagelens_core::snapshot::SnapshotOptions;
 use pagelens_core::SnapshotExt;
+use std::time::Duration;
+use tokio::time::timeout;
 
-/// Simple HTML page for testing
-const TEST_HTML: &str = r#"
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Test Page for Snapshots</title>
-    <style>
-        body { 
-            font-family: Arial, sans-serif; 
-            background-color: #ffffff; 
-            color: #000000;
-        }
-        h1 { color: #333333; }
-        .high-contrast { 
-            background-color: #000000; 
-            color: #ffffff;
-            padding: 10px;
-        }
-        .low-contrast { 
-            background-color: #eeeeee; 
-            color: #dddddd;
-            padding: 10px;
-        }
-    </style>
-</head>
-<body>
-    <header role="banner">
-        <h1>Test Page</h1>
-        <nav role="navigation" aria-label="Main navigation">
-            <a href="/">Home</a>
-            <a href="/about">About</a>
-        </nav>
-    </header>
-    
-    <main role="main">
-        <section aria-labelledby="section1">
-            <h2 id="section1">Section 1</h2>
-            <p class="high-contrast">This is high contrast text.</p>
-            <p class="low-contrast">This is low contrast text.</p>
-        </section>
-        
-        <section>
-            <h2>Form Elements</h2>
-            <form>
-                <label for="username">Username:</label>
-                <input type="text" id="username" name="username" aria-required="true">
-                
-                <label for="email">Email:</label>
-                <input type="email" id="email" name="email">
-                
-                <button type="submit">Submit</button>
-            </form>
-        </section>
-        
-        <section>
-            <h2>Images</h2>
-            <img src="test1.jpg" alt="Descriptive alt text">
-            <img src="test2.jpg" alt="">
-        </section>
-    </main>
-    
-    <footer role="contentinfo">
-        <p>&copy; 2024 Test Page</p>
-    </footer>
-</body>
-</html>
-"#;
+fn tree_contains_role(nodes: &[pagelens_core::snapshot::AccessibilityNode], role: &str) -> bool {
+    nodes
+        .iter()
+        .any(|node| node.role == role || tree_contains_role(&node.children, role))
+}
 
 // ============================================================================
-// Snapshot Tests
+// Snapshot Tests (using shared browser)
 // ============================================================================
 
 #[tokio::test]
-async fn can_capture_page_snapshot() {
-    let browser = Browser::launch().await
-        .expect("Should launch browser");
-    
-    // Create a data URL with our test HTML
-    let encoded = urlencoding::encode(TEST_HTML);
-    let data_url = format!("data:text/html,{}" , encoded);
-    
-    let page = browser.navigate(&data_url).await
-        .expect("Should navigate to URL");
-    
-    // Capture a snapshot with default options
-    let snapshot = page.snapshot(SnapshotOptions::default()).await
+async fn can_capture_page_snapshot_from_nextjs() {
+    let result = timeout(Duration::from_secs(15), async {
+        if !common::nextjs_available().await {
+            common::skip_or_fail("Next.js");
+            return;
+        }
+
+        let snapshot = common::snapshot_from_url(&common::nextjs_url())
+            .await
+            .expect("Should capture snapshot");
+
+        assert!(!snapshot.html.is_empty(), "HTML should be captured");
+        assert!(!snapshot.title.is_empty(), "Title should be captured");
+        assert!(
+            snapshot.url.contains("localhost"),
+            "URL should be localhost"
+        );
+    }).await;
+
+    if result.is_err() {
+        panic!("Test timed out after 15 seconds");
+    }
+}
+
+#[tokio::test]
+async fn can_capture_page_snapshot_from_svelte() {
+    if !common::svelte_available().await {
+        common::skip_or_fail("SvelteKit");
+        return;
+    }
+
+    let snapshot = common::snapshot_from_url(&common::svelte_url())
+        .await
         .expect("Should capture snapshot");
-    
-    // Basic assertions
+
     assert!(!snapshot.html.is_empty(), "HTML should be captured");
-    assert_eq!(snapshot.title, "Test Page for Snapshots", "Title should match");
-    assert!(snapshot.url.starts_with("data:"), "URL should be data URL");
-    
-    browser.shutdown().await.ok();
+    assert!(!snapshot.title.is_empty(), "Title should be captured");
 }
 
 #[tokio::test]
-async fn can_capture_accessibility_tree() {
-    let browser = Browser::launch().await
-        .expect("Should launch browser");
-    
-    let encoded = urlencoding::encode(TEST_HTML);
-    let data_url = format!("data:text/html,{}" , encoded);
-    
-    let page = browser.navigate(&data_url).await
-        .expect("Should navigate to URL");
-    
-    let snapshot = page.snapshot(SnapshotOptions::default()).await
+async fn can_capture_accessibility_tree_from_nextjs() {
+    if !common::nextjs_available().await {
+        common::skip_or_fail("Next.js");
+        return;
+    }
+
+    let about_url = format!("{}/about", common::nextjs_url());
+    let snapshot = common::snapshot_from_url(&about_url)
+        .await
         .expect("Should capture snapshot");
-    
-    // Check accessibility tree
-    let a11y_tree = snapshot.accessibility_tree;
-    // Note: The JS implementation extracts roles from the page
-    // For now we just verify it runs without error and returns a vector
-    // In production, this would use CDP's Accessibility domain for better results
-    
-    browser.shutdown().await.ok();
+
+    // Check accessibility tree - the JS implementation extracts roles from the page
+    let a11y_tree = &snapshot.accessibility_tree;
+
+    // Should have captured some accessibility nodes
+    assert!(
+        !a11y_tree.is_empty(),
+        "Accessibility tree should not be empty"
+    );
+
+    // Look for expected roles (e.g., "heading" for the about page)
+    let has_heading = tree_contains_role(a11y_tree, "heading");
+    assert!(has_heading, "Accessibility tree should contain headings");
 }
 
 #[tokio::test]
-async fn can_capture_performance_timing() {
-    let browser = Browser::launch().await
-        .expect("Should launch browser");
-    
-    // Use example.com for performance timing (data URLs don't have real navigation timing)
-    let page = browser.navigate("https://example.com").await
-        .expect("Should navigate to URL");
-    
-    let snapshot = page.snapshot(SnapshotOptions::default()).await
+async fn can_capture_performance_timing_from_nextjs() {
+    if !common::nextjs_available().await {
+        common::skip_or_fail("Next.js");
+        return;
+    }
+
+    let snapshot = common::snapshot_from_url(&common::nextjs_url())
+        .await
         .expect("Should capture snapshot");
-    
+
     // Performance timing should be present
-    let timing = snapshot.performance_timing;
-    assert!(timing.navigation_start > 0, "Navigation start should be set");
-    
-    browser.shutdown().await.ok();
+    let timing = &snapshot.performance_timing;
+    assert!(
+        timing.navigation_start > 0,
+        "Navigation start should be set"
+    );
 }
 
 #[tokio::test]
-async fn can_capture_computed_styles() {
-    let browser = Browser::launch().await
-        .expect("Should launch browser");
-    
-    let encoded = urlencoding::encode(TEST_HTML);
-    let data_url = format!("data:text/html,{}" , encoded);
-    
-    let page = browser.navigate(&data_url).await
+async fn can_capture_computed_styles_from_nextjs() {
+    if !common::nextjs_available().await {
+        common::skip_or_fail("Next.js");
+        return;
+    }
+
+    let browser = common::create_browser().await;
+
+    let page = browser
+        .navigate(&common::nextjs_url())
+        .await
         .expect("Should navigate to URL");
-    
+
     // Capture snapshot with computed styles
     let options = SnapshotOptions {
         include_computed_styles: true,
         ..Default::default()
     };
-    let snapshot = page.snapshot(options).await
+    let snapshot = page
+        .snapshot(options)
+        .await
         .expect("Should capture snapshot");
-    
+
     // Should have computed styles
-    assert!(!snapshot.computed_styles.is_empty(), "Should have computed styles");
-    
-    browser.shutdown().await.ok();
+    assert!(
+        !snapshot.computed_styles.is_empty(),
+        "Should have computed styles"
+    );
 }
 
 #[tokio::test]
-async fn snapshot_with_custom_options() {
-    let browser = Browser::launch().await
-        .expect("Should launch browser");
-    
-    let encoded = urlencoding::encode(TEST_HTML);
-    let data_url = format!("data:text/html,{}" , encoded);
-    
-    let page = browser.navigate(&data_url).await
+async fn snapshot_with_custom_options_from_nextjs() {
+    if !common::nextjs_available().await {
+        common::skip_or_fail("Next.js");
+        return;
+    }
+
+    let browser = common::create_browser().await;
+
+    let page = browser
+        .navigate(&common::nextjs_url())
+        .await
         .expect("Should navigate to URL");
-    
+
     // Capture snapshot with minimal options
     let options = SnapshotOptions {
         include_html: true,
@@ -192,82 +162,160 @@ async fn snapshot_with_custom_options() {
         include_performance_timing: false,
         include_computed_styles: false,
     };
-    let snapshot = page.snapshot(options).await
+    let snapshot = page
+        .snapshot(options)
+        .await
         .expect("Should capture snapshot");
-    
+
     // Only HTML should be present
     assert!(!snapshot.html.is_empty(), "HTML should be captured");
-    assert!(snapshot.accessibility_tree.is_empty(), "A11y tree should be empty");
+    assert!(
+        snapshot.accessibility_tree.is_empty(),
+        "A11y tree should be empty"
+    );
     assert!(snapshot.computed_styles.is_empty(), "Styles should be empty");
-    
-    browser.shutdown().await.ok();
 }
 
 // ============================================================================
-// Snapshot Content Tests
+// Snapshot Content Tests (using shared browser)
 // ============================================================================
 
 #[tokio::test]
-async fn snapshot_captures_headings() {
-    let browser = Browser::launch().await
-        .expect("Should launch browser");
-    
-    let encoded = urlencoding::encode(TEST_HTML);
-    let data_url = format!("data:text/html,{}" , encoded);
-    
-    let page = browser.navigate(&data_url).await
-        .expect("Should navigate to URL");
-    
-    let snapshot = page.snapshot(SnapshotOptions::default()).await
+async fn snapshot_captures_headings_from_nextjs_about() {
+    if !common::nextjs_available().await {
+        common::skip_or_fail("Next.js");
+        return;
+    }
+
+    let about_url = format!("{}/about", common::nextjs_url());
+    let snapshot = common::snapshot_from_url(&about_url)
+        .await
         .expect("Should capture snapshot");
-    
+
     // Check headings are captured
     let html = snapshot.html;
-    assert!(html.contains("<h1>"), "Should capture h1");
-    assert!(html.contains("<h2>"), "Should capture h2");
-    
-    browser.shutdown().await.ok();
+    let lower = html.to_ascii_lowercase();
+    assert!(lower.contains("<h1"), "Should capture h1");
 }
 
 #[tokio::test]
-async fn snapshot_captures_images() {
-    let browser = Browser::launch().await
-        .expect("Should launch browser");
-    
-    let encoded = urlencoding::encode(TEST_HTML);
-    let data_url = format!("data:text/html,{}" , encoded);
-    
-    let page = browser.navigate(&data_url).await
-        .expect("Should navigate to URL");
-    
-    let snapshot = page.snapshot(SnapshotOptions::default()).await
+async fn snapshot_captures_images_from_nextjs_services() {
+    if !common::nextjs_available().await {
+        common::skip_or_fail("Next.js");
+        return;
+    }
+
+    let services_url = format!("{}/services", common::nextjs_url());
+    let snapshot = common::snapshot_from_url(&services_url)
+        .await
         .expect("Should capture snapshot");
-    
+
     // Check images are captured
     let html = snapshot.html;
-    assert!(html.contains("<img"), "Should capture img tags");
-    assert!(html.contains(r#"alt="Descriptive alt text""#), "Should capture alt text");
-    
-    browser.shutdown().await.ok();
+    assert!(
+        html.contains("<img") || html.contains("<IMG"),
+        "Should capture img tags"
+    );
 }
 
 #[tokio::test]
-async fn snapshot_captures_links() {
-    let browser = Browser::launch().await
-        .expect("Should launch browser");
-    
-    let encoded = urlencoding::encode(TEST_HTML);
-    let data_url = format!("data:text/html,{}" , encoded);
-    
-    let page = browser.navigate(&data_url).await
-        .expect("Should navigate to URL");
-    
-    let snapshot = page.snapshot(SnapshotOptions::default()).await
+async fn snapshot_captures_links_from_nextjs() {
+    if !common::nextjs_available().await {
+        common::skip_or_fail("Next.js");
+        return;
+    }
+
+    let snapshot = common::snapshot_from_url(&common::nextjs_url())
+        .await
         .expect("Should capture snapshot");
-    
+
     // Check links are captured
     let html = snapshot.html;
-    assert!(html.contains(r#"<a href="/""#), "Should capture links");
-    
-    browser.shutdown().await.ok();
+    assert!(
+        html.contains("<a ") || html.contains("<A "),
+        "Should capture anchor tags"
+    );
+}
+
+#[tokio::test]
+async fn snapshot_captures_svelte_page_structure() {
+    if !common::svelte_available().await {
+        common::skip_or_fail("SvelteKit");
+        return;
+    }
+
+    let snapshot = common::snapshot_from_url(&common::svelte_url())
+        .await
+        .expect("Should capture snapshot");
+
+    // SvelteKit pages should have basic structure
+    let html = snapshot.html;
+    assert!(html.contains("<html"), "Should have html tag");
+    let lower = html.to_ascii_lowercase();
+    assert!(lower.contains("<head"), "Should have head tag");
+    assert!(lower.contains("<body"), "Should have body tag");
+}
+
+#[tokio::test]
+async fn snapshot_extracts_referenced_assets_from_nextjs_about() {
+    if !common::nextjs_available().await {
+        common::skip_or_fail("Next.js");
+        return;
+    }
+
+    let about_url = format!("{}/about", common::nextjs_url());
+    let snapshot = common::snapshot_from_url(&about_url)
+        .await
+        .expect("Should capture snapshot");
+
+    let assets = snapshot.referenced_assets;
+
+    assert!(
+        assets
+            .javascript
+            .iter()
+            .any(|u| u.contains("/_next/static/") && u.ends_with(".js")),
+        "Should capture Next.js JS bundles"
+    );
+    assert!(
+        assets
+            .stylesheets
+            .iter()
+            .any(|u| u.contains("/_next/static/") && u.ends_with(".css")),
+        "Should capture Next.js CSS bundles"
+    );
+    assert!(
+        assets.media.iter().any(|u| u.contains("/images/about-office.jpg")),
+        "Should capture media references from page images"
+    );
+}
+
+#[tokio::test]
+async fn snapshot_extracts_referenced_assets_from_svelte_seo_page() {
+    if !common::svelte_available().await {
+        common::skip_or_fail("SvelteKit");
+        return;
+    }
+
+    let seo_test_url = format!("{}/seo-test", common::svelte_url());
+    let snapshot = common::snapshot_from_url(&seo_test_url)
+        .await
+        .expect("Should capture snapshot");
+
+    let assets = snapshot.referenced_assets;
+
+    assert!(
+        assets
+            .javascript
+            .iter()
+            .any(|u| u.contains("/_app/immutable/") && u.ends_with(".js")),
+        "Should capture Svelte JS bundles"
+    );
+    assert!(
+        assets
+            .stylesheets
+            .iter()
+            .any(|u| u.contains("/_app/immutable/") && u.ends_with(".css")),
+        "Should capture Svelte CSS bundles"
+    );
 }
