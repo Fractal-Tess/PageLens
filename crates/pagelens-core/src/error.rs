@@ -1,10 +1,6 @@
-#![allow(unused)]
-
 #[derive(thiserror::Error, Debug)]
+#[allow(clippy::enum_variant_names)]
 pub enum Error {
-    #[error("{0}")]
-    Other(String),
-
     #[error(transparent)]
     IO(#[from] std::io::Error),
 
