@@ -21,6 +21,26 @@ pub struct AnalysisRun {
     pub payload_json: String,
     /// Summary statistics for quick display.
     pub summary: AnalysisSummary,
+    #[serde(default)]
+    pub status: AnalysisRunStatus,
+    pub current_stage: Option<String>,
+    pub current_message: Option<String>,
+    pub progress: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisRunStatus {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+}
+
+impl Default for AnalysisRunStatus {
+    fn default() -> Self {
+        Self::Completed
+    }
 }
 
 /// Type of analysis performed.
@@ -64,12 +84,17 @@ impl Default for AnalysisSummary {
 /// Input for creating a new analysis run.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct CreateAnalysisRun {
+    pub id: Option<String>,
     pub url: String,
     pub name: Option<String>,
     pub analysis_type: AnalysisType,
     /// The complete analysis payload as JSON string.
     pub payload_json: String,
     pub summary: AnalysisSummary,
+    pub status: AnalysisRunStatus,
+    pub current_stage: Option<String>,
+    pub current_message: Option<String>,
+    pub progress: Option<f64>,
 }
 
 /// Input for updating an analysis run's name.
@@ -105,4 +130,35 @@ pub struct HistoryListItem {
     pub name: Option<String>,
     pub analysis_type: AnalysisType,
     pub summary: AnalysisSummary,
+    pub status: AnalysisRunStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct AnalysisPageResult {
+    pub id: String,
+    pub run_id: String,
+    pub url: String,
+    pub depth: u32,
+    pub success: bool,
+    pub seo_score: Option<f64>,
+    pub total_issues: u32,
+    pub error_count: u32,
+    pub warning_count: u32,
+    pub links_found_count: u32,
+    pub error_message: Option<String>,
+    pub analyzed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct CreateAnalysisPageResult {
+    pub run_id: String,
+    pub url: String,
+    pub depth: u32,
+    pub success: bool,
+    pub seo_score: Option<f64>,
+    pub total_issues: u32,
+    pub error_count: u32,
+    pub warning_count: u32,
+    pub links_found_count: u32,
+    pub error_message: Option<String>,
 }

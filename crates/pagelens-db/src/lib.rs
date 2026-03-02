@@ -82,8 +82,10 @@ impl Database {
             .collect();
 
         // Define migrations
-        let migrations: Vec<(i64, &str)> =
-            vec![(1, include_str!("../migrations/001_initial_schema.sql"))];
+        let migrations: Vec<(i64, &str)> = vec![
+            (1, include_str!("../migrations/001_initial_schema.sql")),
+            (2, include_str!("../migrations/002_live_runs_and_pages.sql")),
+        ];
 
         // Apply pending migrations in a transaction
         let tx = self.conn.unchecked_transaction()?;
@@ -147,11 +149,16 @@ pub fn import_from_file(db: &Database, path: &Path) -> Result<usize> {
     for run in export.runs {
         // Create a new run with the same data but new ID
         let input = CreateAnalysisRun {
+            id: None,
             url: run.url,
             name: run.name,
             analysis_type: run.analysis_type,
             payload_json: run.payload_json,
             summary: run.summary,
+            status: run.status,
+            current_stage: run.current_stage,
+            current_message: run.current_message,
+            progress: run.progress,
         };
 
         repo.create(input)?;
