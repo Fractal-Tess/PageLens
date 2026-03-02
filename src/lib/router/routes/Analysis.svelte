@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { listen, type UnlistenFn } from '@tauri-apps/api/event'
   import { Button } from '$components/ui/button'
   import { Input } from '$components/ui/input'
   import { Label } from '$components/ui/label'
@@ -30,12 +29,10 @@
     Gauge,
     Layers
   } from '@lucide/svelte'
-  import { analyzeUrl, crawlUrl } from '$lib/services/analysis'
-  import type {
-    AnalysisProgressEvent,
-    AnalysisResult,
-    AnalysisRun
-  } from '$lib/types'
+  import { push } from 'svelte-spa-router'
+  import { commands, events, type AnalysisRun } from '$lib/ipc'
+  import type { SiteFilesReport as SiteFilesReportType } from '$lib/types'
+  import SiteFilesReportComponent from '$lib/components/report/SiteFilesReport.svelte'
 
   // ============================================================================
   // State
@@ -75,21 +72,18 @@
   })
 
   // Event listener
-  let unlistenProgress: UnlistenFn | null = $state(null)
+  let unlistenProgress: (() => void) | null = $state(null)
 
   // ============================================================================
   // Lifecycle
   // ============================================================================
 
   onMount(async () => {
-    unlistenProgress = await listen<AnalysisProgressEvent>(
-      'analysis-progress',
-      event => {
-        progressStage = event.payload.stage
-        progressMessage = event.payload.message
-        progress = event.payload.progress ? event.payload.progress * 100 : 0
-      }
-    )
+    unlistenProgress = await events.analysisProgressEvent.listen(event => {
+      progressStage = event.payload.stage
+      progressMessage = event.payload.message
+      progress = event.payload.progress ? event.payload.progress * 100 : 0
+    })
   })
 
   onDestroy(() => {
@@ -108,15 +102,14 @@
       return
     }
 
-    isAnalyzing = true
-    progress = 0
-    error = null
-    lastResult = null
+    const runId = crypto.randomUUID()
+    push(`/run/${runId}`)
 
-    try {
-      const result: AnalysisResult = await analyzeUrl({
+    void commands
+      .analyzeUrl({
+        run_id: runId,
         url: url.trim(),
-        name: name.trim() || undefined,
+        name: name.trim() || null,
         options: {
           include_html: singleOptions.includeHtml,
           include_accessibility_tree: singleOptions.includeAccessibilityTree,
@@ -124,15 +117,10 @@
           include_computed_styles: singleOptions.includeComputedStyles
         }
       })
-
-      lastResult = result.run
-      toast.success('Analysis complete!')
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err)
-      toast.error(`Analysis failed: ${error}`)
-    } finally {
-      isAnalyzing = false
-    }
+      .catch(err => {
+        const message = err instanceof Error ? err.message : String(err)
+        toast.error(`Analysis failed: ${message}`)
+      })
   }
 
   async function handleCrawlAnalysis() {
@@ -141,15 +129,14 @@
       return
     }
 
-    isAnalyzing = true
-    progress = 0
-    error = null
-    lastResult = null
+    const runId = crypto.randomUUID()
+    push(`/run/${runId}`)
 
-    try {
-      const result: AnalysisResult = await crawlUrl({
+    void commands
+      .crawlUrl({
+        run_id: runId,
         url: url.trim(),
-        name: name.trim() || undefined,
+        name: name.trim() || null,
         options: {
           max_pages: crawlOptions.maxPages,
           max_depth: crawlOptions.maxDepth,
@@ -160,15 +147,37 @@
           max_concurrency: crawlOptions.maxConcurrency
         }
       })
+      .catch(err => {
+        const message = err instanceof Error ? err.message : String(err)
+        toast.error(`Crawl failed: ${message}`)
+      })
+  }
 
-      lastResult = result.run
-      toast.success('Crawl complete!')
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err)
-      toast.error(`Crawl failed: ${error}`)
-    } finally {
-      isAnalyzing = false
+  // Site files state
+  let siteFilesUrl = $state('')
+  let isAnalyzingSiteFiles = $state(false)
+  let siteFilesReport = $state<SiteFilesReportType | null>(null)
+  let siteFilesError = $state<string | null>(null)
+
+  async function handleSiteFilesAnalysis() {
+    if (!siteFilesUrl.trim()) {
+      toast.error('Please enter a URL')
+      return
     }
+
+    const runId = crypto.randomUUID()
+    push(`/run/${runId}`)
+
+    void commands
+      .analyzeSiteFiles({
+        run_id: runId,
+        url: siteFilesUrl.trim(),
+        crawled_urls: null
+      })
+      .catch(err => {
+        const message = err instanceof Error ? err.message : String(err)
+        toast.error(`Site files analysis failed: ${message}`)
+      })
   }
 
   function formatDuration(ms: number): string {
@@ -203,7 +212,7 @@
     <!-- Input Section -->
     <div class="space-y-6">
       <Tabs value="single" class="w-full">
-        <TabsList class="grid w-full grid-cols-2">
+        <TabsList class="grid w-full grid-cols-3">
           <TabsTrigger value="single">
             <FileText class="mr-2 h-4 w-4" />
             Single Page
@@ -211,6 +220,10 @@
           <TabsTrigger value="crawl">
             <Globe class="mr-2 h-4 w-4" />
             Crawl
+          </TabsTrigger>
+          <TabsTrigger value="sitefiles">
+            <Layers class="mr-2 h-4 w-4" />
+            Site Files
           </TabsTrigger>
         </TabsList>
 
@@ -412,6 +425,56 @@
             </CardContent>
           </Card>
         </TabsContent>
+
+        <!-- Site Files Analysis -->
+        <TabsContent value="sitefiles" class="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle class="flex items-center gap-2">
+                <Layers class="h-5 w-5 text-teal-500" />
+                Site Files Analysis
+              </CardTitle>
+              <CardDescription>
+                Check robots.txt, sitemaps, and other site files
+              </CardDescription>
+            </CardHeader>
+            <CardContent class="space-y-4">
+              <div class="space-y-2">
+                <Label for="url-sitefiles">URL</Label>
+                <Input
+                  id="url-sitefiles"
+                  type="url"
+                  placeholder="https://example.com"
+                  bind:value={siteFilesUrl}
+                  disabled={isAnalyzingSiteFiles}
+                />
+              </div>
+
+              <Button
+                class="w-full"
+                onclick={handleSiteFilesAnalysis}
+                disabled={isAnalyzingSiteFiles || !siteFilesUrl.trim()}
+              >
+                {#if isAnalyzingSiteFiles}
+                  <Loader2 class="mr-2 h-4 w-4 animate-spin" />
+                  Analyzing...
+                {:else}
+                  <Layers class="mr-2 h-4 w-4" />
+                  Analyze Site Files
+                {/if}
+              </Button>
+
+              {#if siteFilesError}
+                <p class="text-sm text-red-500">{siteFilesError}</p>
+              {/if}
+
+              {#if siteFilesReport}
+                <Separator />
+                <SiteFilesReportComponent report={siteFilesReport} />
+              {/if}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
     </div>
 
@@ -559,10 +622,14 @@
               </Badge>
             </div>
 
-            <!-- View in History Link -->
-            <Button variant="outline" class="w-full" href="/#history">
+            <!-- View Detailed Report -->
+            <Button
+              variant="outline"
+              class="w-full"
+              onclick={() => push(`/run/${lastResult!.id}`)}
+            >
               <Layers class="mr-2 h-4 w-4" />
-              View in History
+              View Detailed Report
             </Button>
           </CardContent>
         </Card>

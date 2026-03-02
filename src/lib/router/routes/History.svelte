@@ -12,48 +12,34 @@
   } from '$components/ui/card'
   import { Badge } from '$components/ui/badge'
   import { Separator } from '$components/ui/separator'
-  import { ScrollArea } from '$components/ui/scroll-area'
   import {
     Dialog,
     DialogContent,
     DialogDescription,
     DialogHeader,
     DialogTitle,
-    DialogTrigger,
     DialogFooter,
     DialogClose
   } from '$components/ui/dialog'
-  import { Alert, AlertDescription, AlertTitle } from '$components/ui/alert'
   import { toast } from 'svelte-sonner'
   import {
     History,
     Search,
     Trash2,
-    FileJson,
     Download,
     Upload,
-    X,
     ChevronRight,
     FileText,
     Globe,
     Clock,
-    AlertCircle,
     CheckCircle2,
     RefreshCw,
     Edit3,
     AlertTriangle
   } from '@lucide/svelte'
-  import {
-    listHistory,
-    getHistoryItem,
-    updateHistoryItem,
-    deleteHistoryItem,
-    deleteAllHistory,
-    exportHistory,
-    importHistory
-  } from '$lib/services/analysis'
-  import type { HistoryListItem, AnalysisRun } from '$lib/types'
-
+  import { push } from 'svelte-spa-router'
+  import { invoke } from '@tauri-apps/api/core'
+  import { commands, type HistoryListItem } from '$lib/ipc'
 
   // ============================================================================
   // State
@@ -62,16 +48,16 @@
   let historyItems = $state<HistoryListItem[]>([])
   let isLoading = $state(true)
   let searchQuery = $state('')
-  let selectedItem = $state<AnalysisRun | null>(null)
-  let isViewDialogOpen = $state(false)
   let isRenameDialogOpen = $state(false)
   let isDeleteDialogOpen = $state(false)
   let isDeleteAllDialogOpen = $state(false)
   let isExportDialogOpen = $state(false)
+  let isRunExportDialogOpen = $state(false)
   let isImportDialogOpen = $state(false)
   let itemToAction = $state<HistoryListItem | null>(null)
   let newName = $state('')
   let exportPath = $state('')
+  let runExportPath = $state('')
   let importPath = $state('')
 
   // ============================================================================
@@ -103,23 +89,18 @@
   async function loadHistory() {
     isLoading = true
     try {
-      historyItems = await listHistory(100, 0)
+      const result = await commands.listHistory(100, 0)
+      if (result.status === 'error') {
+        toast.error('Failed to load history')
+        console.error(result.error)
+      } else {
+        historyItems = result.data
+      }
     } catch (err) {
       toast.error('Failed to load history')
       console.error(err)
     } finally {
       isLoading = false
-    }
-  }
-
-  async function viewItem(item: HistoryListItem) {
-    try {
-      const fullItem = await getHistoryItem(item.id)
-      selectedItem = fullItem
-      isViewDialogOpen = true
-    } catch (err) {
-      toast.error('Failed to load item details')
-      console.error(err)
     }
   }
 
@@ -133,12 +114,17 @@
     if (!itemToAction) return
 
     try {
-      await updateHistoryItem(itemToAction.id, {
-        name: newName.trim() || undefined
+      const result = await commands.updateHistoryItem(itemToAction.id, {
+        name: newName.trim() || null
       })
-      toast.success('Item renamed')
-      await loadHistory()
-      isRenameDialogOpen = false
+      if (result.status === 'error') {
+        toast.error('Failed to rename item')
+        console.error(result.error)
+      } else {
+        toast.success('Item renamed')
+        await loadHistory()
+        isRenameDialogOpen = false
+      }
     } catch (err) {
       toast.error('Failed to rename item')
       console.error(err)
@@ -154,10 +140,15 @@
     if (!itemToAction) return
 
     try {
-      await deleteHistoryItem(itemToAction.id)
-      toast.success('Item deleted')
-      await loadHistory()
-      isDeleteDialogOpen = false
+      const result = await commands.deleteHistoryItem(itemToAction.id)
+      if (result.status === 'error') {
+        toast.error('Failed to delete item')
+        console.error(result.error)
+      } else {
+        toast.success('Item deleted')
+        await loadHistory()
+        isDeleteDialogOpen = false
+      }
     } catch (err) {
       toast.error('Failed to delete item')
       console.error(err)
@@ -166,10 +157,15 @@
 
   async function confirmDeleteAll() {
     try {
-      const count = await deleteAllHistory()
-      toast.success(`Deleted ${count} items`)
-      await loadHistory()
-      isDeleteAllDialogOpen = false
+      const result = await commands.deleteAllHistory()
+      if (result.status === 'error') {
+        toast.error('Failed to delete all items')
+        console.error(result.error)
+      } else {
+        toast.success(`Deleted ${result.data} items`)
+        await loadHistory()
+        isDeleteAllDialogOpen = false
+      }
     } catch (err) {
       toast.error('Failed to delete all items')
       console.error(err)
@@ -183,10 +179,43 @@
     }
 
     try {
-      await exportHistory(exportPath.trim())
-      toast.success('History exported successfully')
-      isExportDialogOpen = false
-      exportPath = ''
+      const result = await commands.exportHistory(exportPath.trim())
+      if (result.status === 'error') {
+        toast.error(`Export failed: ${result.error}`)
+      } else {
+        toast.success('History exported successfully')
+        isExportDialogOpen = false
+        exportPath = ''
+      }
+    } catch (err) {
+      toast.error(
+        `Export failed: ${err instanceof Error ? err.message : String(err)}`
+      )
+    }
+  }
+
+  function openRunExportDialog(item: HistoryListItem) {
+    itemToAction = item
+    runExportPath = ''
+    isRunExportDialogOpen = true
+  }
+
+  async function confirmRunExport() {
+    if (!itemToAction) return
+    if (!runExportPath.trim()) {
+      toast.error('Please enter a file path')
+      return
+    }
+
+    try {
+      await invoke('export_history_item', {
+        id: itemToAction.id,
+        path: runExportPath.trim()
+      })
+      toast.success('Analysis run exported successfully')
+      isRunExportDialogOpen = false
+      runExportPath = ''
+      itemToAction = null
     } catch (err) {
       toast.error(
         `Export failed: ${err instanceof Error ? err.message : String(err)}`
@@ -201,11 +230,15 @@
     }
 
     try {
-      const count = await importHistory(importPath.trim())
-      toast.success(`Imported ${count} items`)
-      await loadHistory()
-      isImportDialogOpen = false
-      importPath = ''
+      const result = await commands.importHistory(importPath.trim())
+      if (result.status === 'error') {
+        toast.error(`Import failed: ${result.error}`)
+      } else {
+        toast.success(`Imported ${result.data} items`)
+        await loadHistory()
+        isImportDialogOpen = false
+        importPath = ''
+      }
     } catch (err) {
       toast.error(
         `Import failed: ${err instanceof Error ? err.message : String(err)}`
@@ -405,9 +438,9 @@
                 <Button
                   variant="ghost"
                   size="sm"
-                  onclick={() => viewItem(item)}
+                  onclick={() => push(`/run/${item.id}`)}
                 >
-                  <FileJson class="mr-2 h-4 w-4" />
+                  <ChevronRight class="mr-2 h-4 w-4" />
                   View
                 </Button>
 
@@ -417,6 +450,14 @@
                   onclick={() => openRenameDialog(item)}
                 >
                   <Edit3 class="h-4 w-4" />
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onclick={() => openRunExportDialog(item)}
+                >
+                  <Download class="h-4 w-4" />
                 </Button>
 
                 <Button
@@ -435,41 +476,6 @@
     </div>
   {/if}
 </div>
-
-<!-- View Dialog -->
-<Dialog bind:open={isViewDialogOpen}>
-  <DialogContent class="max-w-4xl max-h-[90vh]">
-    <DialogHeader>
-      <DialogTitle class="flex items-center gap-2">
-        <FileJson class="h-5 w-5" />
-        Analysis Details
-      </DialogTitle>
-      <DialogDescription>
-        Full payload JSON for {selectedItem?.name || 'this analysis'}
-      </DialogDescription>
-    </DialogHeader>
-
-    <ScrollArea class="h-[60vh] w-full">
-      {#if selectedItem}
-        <pre class="rounded-lg bg-muted p-4 text-xs overflow-auto">
-          <code
-            >{JSON.stringify(
-              JSON.parse(selectedItem.payload_json),
-              null,
-              2
-            )}</code
-          >
-        </pre>
-      {/if}
-    </ScrollArea>
-
-    <DialogFooter>
-      <DialogClose>
-        <Button variant="outline">Close</Button>
-      </DialogClose>
-    </DialogFooter>
-  </DialogContent>
-</Dialog>
 
 <!-- Rename Dialog -->
 <Dialog bind:open={isRenameDialogOpen}>
@@ -547,6 +553,45 @@
       <Button variant="destructive" onclick={confirmDeleteAll}>
         <Trash2 class="mr-2 h-4 w-4" />
         Delete All
+      </Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
+
+<Dialog bind:open={isRunExportDialogOpen}>
+  <DialogContent>
+    <DialogHeader>
+      <DialogTitle class="flex items-center gap-2">
+        <Download class="h-5 w-5" />
+        Export Analysis Run
+      </DialogTitle>
+      <DialogDescription>
+        Export "{itemToAction?.name || 'this analysis'}" and its page rows to a
+        JSON file
+      </DialogDescription>
+    </DialogHeader>
+
+    <div class="space-y-4 py-4">
+      <div class="space-y-2">
+        <Label for="run-export-path">File Path</Label>
+        <Input
+          id="run-export-path"
+          placeholder="/home/user/pagelens-run-export.json"
+          bind:value={runExportPath}
+        />
+        <p class="text-xs text-muted-foreground">
+          Enter the full path where this run export file should be saved
+        </p>
+      </div>
+    </div>
+
+    <DialogFooter>
+      <DialogClose>
+        <Button variant="outline">Cancel</Button>
+      </DialogClose>
+      <Button onclick={confirmRunExport}>
+        <Download class="mr-2 h-4 w-4" />
+        Export Run
       </Button>
     </DialogFooter>
   </DialogContent>
