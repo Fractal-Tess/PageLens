@@ -10,7 +10,7 @@
 //! - crawl_generates_summary_report — Summary generation
 //!
 //! Integration tests use the running test applications.
-//! Run `bun run start-test-apps` from the project root before running tests.
+//! Run `bun run start-apps` from the project root before running tests.
 
 mod common;
 

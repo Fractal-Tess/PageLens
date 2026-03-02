@@ -44,7 +44,7 @@
 #JP|        run: bun install --frozen-lockfile
 #QW|
 #RB|      - name: Build frontend
-#XM|        run: bun svelte:build
+#XM|        run: bun run --cwd apps/dowry svelte:build
 #NB|
 #YP|      - uses: rui314/setup-mold@v1
 #PP|        if: matrix.platform == 'ubuntu-22.04'
@@ -56,7 +56,7 @@
 #VW|
 #TB|      - uses: Swatinem/rust-cache@v2
 #JM|        with:
-#WH|          workspaces: './src-tauri/ -> target'
+#WH|          workspaces: './apps/dowry/src-tauri/ -> target'
 #PZ|
 #VS|      - name: install dependencies (ubuntu only)
 #PP|        if: matrix.platform == 'ubuntu-22.04'
@@ -70,3 +70,5 @@
 #XH|          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
 #YQ|          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 #HX|          # TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+#NN|        with:
+#WX|          projectPath: apps/dowry/src-tauri

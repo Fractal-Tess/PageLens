@@ -7,7 +7,7 @@
 //! - can_get_page_title — Basic DOM extraction
 //!
 //! These tests use the running test applications instead of embedded HTML.
-//! Run `bun run start-test-apps` from the project root before running tests.
+//! Run `bun run start-apps` from the project root before running tests.
 //!
 //! IMPORTANT: These tests must run sequentially (not in parallel) because Chromium
 //! can have port conflicts when multiple instances are launched simultaneously.
@@ -108,7 +108,7 @@ async fn can_navigate_to_nextjs_homepage() {
     }).await;
 
     if result.is_err() {
-        panic!("Test timed out after 30 seconds - test apps may not be running. Run 'bun run start-test-apps' first.");
+        panic!("Test timed out after 30 seconds - test apps may not be running. Run 'bun run start-apps' first.");
     }
 }
 
@@ -132,7 +132,7 @@ async fn can_navigate_to_svelte_homepage() {
     }).await;
 
     if result.is_err() {
-        panic!("Test timed out after 30 seconds - test apps may not be running. Run 'bun run start-test-apps' first.");
+        panic!("Test timed out after 30 seconds - test apps may not be running. Run 'bun run start-apps' first.");
     }
 }
 
@@ -167,7 +167,7 @@ async fn can_get_page_title_from_nextjs() {
     }).await;
 
     if result.is_err() {
-        panic!("Test timed out after 30 seconds - test apps may not be running. Run 'bun run start-test-apps' first.");
+        panic!("Test timed out after 30 seconds - test apps may not be running. Run 'bun run start-apps' first.");
     }
 }
 
@@ -196,7 +196,7 @@ async fn can_get_page_title_from_svelte() {
     }).await;
 
     if result.is_err() {
-        panic!("Test timed out after 30 seconds - test apps may not be running. Run 'bun run start-test-apps' first.");
+        panic!("Test timed out after 30 seconds - test apps may not be running. Run 'bun run start-apps' first.");
     }
 }
 
@@ -226,7 +226,7 @@ async fn can_navigate_to_example_com() {
     }).await;
 
     if result.is_err() {
-        panic!("Test timed out after 30 seconds - test apps may not be running. Run 'bun run start-test-apps' first.");
+        panic!("Test timed out after 30 seconds - test apps may not be running. Run 'bun run start-apps' first.");
     }
 }
 
