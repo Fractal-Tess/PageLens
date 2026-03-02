@@ -527,9 +527,14 @@ async fn capture_performance_timing(page: &Page) -> Result<PerformanceTiming> {
                 return sum + (entry && typeof entry.value === 'number' ? entry.value : 0);
             }, 0);
             const inpEntries = performance.getEntriesByType('event') || [];
-            const inpCandidate = inpEntries
+            const inpDurations = inpEntries
                 .filter(e => e && e.interactionId > 0 && typeof e.duration === 'number')
-                .sort((a, b) => b.duration - a.duration)[0];
+                .map(e => e.duration)
+                .filter(d => Number.isFinite(d) && d >= 0)
+                .sort((a, b) => a - b);
+            const inpCandidate = inpDurations.length
+                ? inpDurations[Math.max(0, Math.ceil(inpDurations.length * 0.98) - 1)]
+                : null;
             const entry = performance.getEntriesByType('navigation')[0];
             if (entry) {
                 return JSON.stringify({
@@ -542,7 +547,7 @@ async fn capture_performance_timing(page: &Page) -> Result<PerformanceTiming> {
                     first_contentful_paint: firstContentfulPaint ? Math.round(origin + firstContentfulPaint.startTime) : null,
                     largest_contentful_paint: lcp ? Math.round(origin + lcp.startTime) : null,
                     cumulative_layout_shift: cls > 0 ? cls : null,
-                    interaction_to_next_paint: inpCandidate ? Math.round(inpCandidate.duration) : null
+                    interaction_to_next_paint: inpCandidate !== null ? Math.round(inpCandidate) : null
                 });
             }
 
@@ -558,7 +563,7 @@ async fn capture_performance_timing(page: &Page) -> Result<PerformanceTiming> {
                 first_contentful_paint: firstContentfulPaint ? Math.round(origin + firstContentfulPaint.startTime) : null,
                 largest_contentful_paint: lcp ? Math.round(origin + lcp.startTime) : null,
                 cumulative_layout_shift: cls > 0 ? cls : null,
-                interaction_to_next_paint: inpCandidate ? Math.round(inpCandidate.duration) : null
+                interaction_to_next_paint: inpCandidate !== null ? Math.round(inpCandidate) : null
             });
         })()
     "#;
