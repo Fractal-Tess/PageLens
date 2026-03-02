@@ -5,18 +5,6 @@
 
 
 export const commands = {
-async helloTauri() : Promise<string> {
-    return await TAURI_INVOKE("hello_tauri");
-},
-async hash256sum(hashInput: string) : Promise<string> {
-    return await TAURI_INVOKE("hash256sum", { hashInput });
-},
-async storeSetKey(key: string, value: string) : Promise<void> {
-    await TAURI_INVOKE("store_set_key", { key, value });
-},
-async storeReadKey(key: string) : Promise<string | null> {
-    return await TAURI_INVOKE("store_read_key", { key });
-},
 /**
  * Analyze a single URL and store the result.
  */
@@ -34,6 +22,25 @@ async analyzeUrl(input: AnalyzeUrlInput) : Promise<Result<AnalysisResult, string
 async crawlUrl(input: CrawlUrlInput) : Promise<Result<AnalysisResult, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("crawl_url", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Analyze site files (robots.txt, sitemaps, etc.) for a given URL.
+ */
+async analyzeSiteFiles(input: SiteFilesInput) : Promise<Result<AnalysisResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("analyze_site_files", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listAnalysisPageResults(id: string) : Promise<Result<AnalysisPageResult[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_analysis_page_results", { id }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -105,6 +112,14 @@ async exportHistory(path: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async exportHistoryItem(id: string, path: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("export_history_item", { id, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Import history from a JSON file.
  */
@@ -122,11 +137,11 @@ async importHistory(path: string) : Promise<Result<number, string>> {
 
 
 export const events = __makeEvents__<{
-analysisProgressEvent: AnalysisProgressEvent,
-exampleEvent: ExampleEvent
+analysisPageEvent: AnalysisPageEvent,
+analysisProgressEvent: AnalysisProgressEvent
 }>({
-analysisProgressEvent: "analysis-progress-event",
-exampleEvent: "example-event"
+analysisPageEvent: "analysis-page-event",
+analysisProgressEvent: "analysis-progress-event"
 })
 
 /** user-defined constants **/
@@ -135,10 +150,12 @@ exampleEvent: "example-event"
 
 /** user-defined types **/
 
+export type AnalysisPageEvent = { run_id: string; page: AnalysisPageResult }
+export type AnalysisPageResult = { id: string; run_id: string; url: string; depth: number; success: boolean; seo_score: number | null; total_issues: number; error_count: number; warning_count: number; links_found_count: number; error_message: string | null; analyzed_at: string }
 /**
  * Event emitted during analysis progress.
  */
-export type AnalysisProgressEvent = { stage: string; message: string; progress: number | null }
+export type AnalysisProgressEvent = { run_id: string; stage: string; message: string; progress: number | null; page_count: number | null; success_count: number | null; failed_count: number | null }
 /**
  * Result of single page analysis.
  */
@@ -176,7 +193,8 @@ payload_json: string;
 /**
  * Summary statistics for quick display.
  */
-summary: AnalysisSummary }
+summary: AnalysisSummary; status?: AnalysisRunStatus; current_stage: string | null; current_message: string | null; progress: number | null }
+export type AnalysisRunStatus = "pending" | "running" | "completed" | "failed"
 /**
  * Summary statistics for quick display in history list.
  */
@@ -212,7 +230,7 @@ export type AnalysisType = "single" | "crawl"
 /**
  * Input for single page analysis.
  */
-export type AnalyzeUrlInput = { url: string; name: string | null; options: SnapshotOptionsInput | null }
+export type AnalyzeUrlInput = { run_id: string | null; url: string; name: string | null; options: SnapshotOptionsInput | null }
 /**
  * Crawl options input.
  */
@@ -220,12 +238,15 @@ export type CrawlOptionsInput = { max_pages: number; max_depth: number; follow_e
 /**
  * Input for crawl analysis.
  */
-export type CrawlUrlInput = { url: string; name: string | null; options: CrawlOptionsInput | null }
-export type ExampleEvent = string
+export type CrawlUrlInput = { run_id: string | null; url: string; name: string | null; options: CrawlOptionsInput | null }
 /**
  * List item for history (lighter weight than full AnalysisRun).
  */
-export type HistoryListItem = { id: string; url: string; created_at: string; name: string | null; analysis_type: AnalysisType; summary: AnalysisSummary }
+export type HistoryListItem = { id: string; url: string; created_at: string; name: string | null; analysis_type: AnalysisType; summary: AnalysisSummary; status: AnalysisRunStatus }
+/**
+ * Input for site files analysis.
+ */
+export type SiteFilesInput = { run_id: string | null; url: string; crawled_urls: string[] | null }
 /**
  * Snapshot options input.
  */
