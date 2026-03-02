@@ -1,17 +1,21 @@
 <script lang="ts">
   import Router from '$router/Router.svelte'
   import { ModeWatcher, mode } from 'mode-watcher'
-  import Header from '$lib/components/Header.svelte'
   import { Toaster } from 'svelte-sonner'
+  import { SidebarProvider, SidebarInset } from '$components/ui/sidebar'
+  import AppSidebar from '$lib/components/AppSidebar.svelte'
+  import AppHeader from '$lib/components/AppHeader.svelte'
 </script>
 
 <ModeWatcher defaultMode="dark" />
 <Toaster theme={mode.current} />
 
-<div class="relative flex flex-col h-screen" data-vaul-drawer-wrapper id="page">
-  <Header />
-  <main class="flex-1">
-    <Router />
-  </main>
-</div>
-
+<SidebarProvider>
+  <AppSidebar />
+  <SidebarInset>
+    <AppHeader />
+    <main class="flex-1 overflow-auto">
+      <Router />
+    </main>
+  </SidebarInset>
+</SidebarProvider>
