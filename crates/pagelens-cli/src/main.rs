@@ -1146,6 +1146,9 @@ mod tests {
             response_start: Some(1100),
             first_paint: Some(1250),
             first_contentful_paint: Some(1350),
+            largest_contentful_paint: Some(1600),
+            cumulative_layout_shift: Some(0.08),
+            interaction_to_next_paint: Some(190),
         };
 
         let report = build_performance_report(&timing);
