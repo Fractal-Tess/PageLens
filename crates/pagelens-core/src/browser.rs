@@ -11,6 +11,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 
+fn sort_by_start_time(records: &mut [crate::snapshot::NetworkRequestRecord]) {
+    records.sort_by(|a, b| {
+        a.request_start_time_s
+            .partial_cmp(&b.request_start_time_s)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
+
 /// Environment variable for Playwright Chromium path
 const PLAYWRIGHT_CHROMIUM_ENV: &str = "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH";
 
@@ -256,11 +264,7 @@ impl Browser {
 
                                 let mut out = collected.lock().await;
                                 let mut values: Vec<_> = by_request.values().cloned().collect();
-                                values.sort_by(|a, b| {
-                                    a.request_start_time_s
-                                        .partial_cmp(&b.request_start_time_s)
-                                        .unwrap_or(std::cmp::Ordering::Equal)
-                                });
+                                sort_by_start_time(&mut values);
                                 *out = values;
                             }
                             resp = response_stream.next() => {
@@ -291,11 +295,7 @@ impl Browser {
 
                                 let mut out = collected.lock().await;
                                 let mut values: Vec<_> = by_request.values().cloned().collect();
-                                values.sort_by(|a, b| {
-                                    a.request_start_time_s
-                                        .partial_cmp(&b.request_start_time_s)
-                                        .unwrap_or(std::cmp::Ordering::Equal)
-                                });
+                                sort_by_start_time(&mut values);
                                 *out = values;
                             }
                             finished = finished_stream.next() => {
@@ -316,11 +316,7 @@ impl Browser {
 
                                 let mut out = collected.lock().await;
                                 let mut values: Vec<_> = by_request.values().cloned().collect();
-                                values.sort_by(|a, b| {
-                                    a.request_start_time_s
-                                        .partial_cmp(&b.request_start_time_s)
-                                        .unwrap_or(std::cmp::Ordering::Equal)
-                                });
+                                sort_by_start_time(&mut values);
                                 *out = values;
                             }
                             failed = failed_stream.next() => {
@@ -341,11 +337,7 @@ impl Browser {
 
                                 let mut out = collected.lock().await;
                                 let mut values: Vec<_> = by_request.values().cloned().collect();
-                                values.sort_by(|a, b| {
-                                    a.request_start_time_s
-                                        .partial_cmp(&b.request_start_time_s)
-                                        .unwrap_or(std::cmp::Ordering::Equal)
-                                });
+                                sort_by_start_time(&mut values);
                                 *out = values;
                             }
                         }
@@ -353,11 +345,7 @@ impl Browser {
 
                     let mut out = collected.lock().await;
                     let mut values: Vec<_> = by_request.into_values().collect();
-                    values.sort_by(|a, b| {
-                        a.request_start_time_s
-                            .partial_cmp(&b.request_start_time_s)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    });
+                    sort_by_start_time(&mut values);
                     *out = values;
                 });
             }
