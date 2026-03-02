@@ -4,6 +4,7 @@ mod prelude;
 use clap::{ArgAction, Parser, ValueEnum};
 use pagelens_core::browser::Browser;
 use pagelens_core::seo::SeoAnalyzer;
+use pagelens_core::site_files::SiteFilesAnalyzer;
 use pagelens_core::snapshot::{SnapshotExt, SnapshotOptions};
 use reqwest::header::{CONTENT_LENGTH, CONTENT_RANGE, HeaderMap, HeaderName, HeaderValue, RANGE};
 use serde::Serialize;
@@ -46,6 +47,9 @@ struct Cli {
 
     #[arg(long, help = "Run basic text/background contrast audit")]
     contrast: bool,
+
+    #[arg(long, help = "Analyze robots.txt and sitemap files")]
+    site_files: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, Serialize)]
@@ -98,6 +102,7 @@ async fn main() {
         &request_headers,
         cli.perf,
         cli.contrast,
+        cli.site_files,
     )
     .await
     {
@@ -117,17 +122,20 @@ async fn run_audit(
     request_headers: &HashMap<String, String>,
     include_perf: bool,
     include_contrast: bool,
+    include_site_files: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let effective_mode = if seo_only_flag {
         AnalysisMode::SeoOnly
     } else {
         mode
     };
-    let (effective_assets, effective_perf, effective_contrast) = match effective_mode {
-        AnalysisMode::Full => (true, true, true),
-        AnalysisMode::Custom => (include_assets, include_perf, include_contrast),
-        AnalysisMode::SeoOnly => (false, false, false),
-    };
+    let toggles = resolve_effective_toggles(
+        effective_mode,
+        include_assets,
+        include_perf,
+        include_contrast,
+        include_site_files,
+    );
 
     if !json_output {
         println!("🔍 PageLens Audit");
@@ -166,7 +174,7 @@ async fn run_audit(
     }
     
     let mut snapshot_options = SnapshotOptions::default();
-    snapshot_options.include_computed_styles = effective_contrast;
+    snapshot_options.include_computed_styles = toggles.contrast;
 
     let snapshot = page.snapshot(snapshot_options).await
         .map_err(|e| format!("Failed to capture snapshot: {e}"))?;
@@ -174,22 +182,31 @@ async fn run_audit(
     // Run SEO analysis
     let seo_report = SeoAnalyzer::analyze(&snapshot);
 
-    let asset_sizes = if effective_assets {
+    let asset_sizes = if toggles.assets {
         Some(analyze_asset_sizes(&snapshot.referenced_assets, request_headers).await)
     } else {
         None
     };
 
-    let performance_report = if effective_perf {
+    let performance_report = if toggles.perf {
         Some(build_performance_report(&snapshot.performance_timing))
     } else {
         None
     };
 
-    let contrast_report = if effective_contrast {
+    let contrast_report = if toggles.contrast {
         Some(analyze_contrast(&snapshot.computed_styles))
     } else {
         None
+    };
+
+    let (site_files_report, site_files_error) = if toggles.site_files {
+        match SiteFilesAnalyzer::analyze(url).await {
+            Ok(report) => (Some(report), None),
+            Err(err) => (None, Some(err.to_string())),
+        }
+    } else {
+        (None, None)
     };
 
     // Output results
@@ -210,11 +227,13 @@ async fn run_audit(
                 "issues": seo_report.issues,
             },
             "asset_sizes": asset_sizes,
-            "asset_sort": if effective_assets { Some(asset_sort) } else { None },
-            "asset_group": if effective_assets { Some(asset_group) } else { None },
+            "asset_sort": if toggles.assets { Some(asset_sort) } else { None },
+            "asset_group": if toggles.assets { Some(asset_group) } else { None },
             "analysis_mode": effective_mode,
             "performance": performance_report,
             "contrast": contrast_report,
+            "site_files": site_files_report,
+            "site_files_error": site_files_error,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
@@ -225,10 +244,19 @@ async fn run_audit(
         if let Some(report) = &contrast_report {
             print_contrast_report(report);
         }
-        if effective_assets {
+        if toggles.assets {
             if let Some(sizes) = &asset_sizes {
                 print_assets_report(sizes, asset_sort, asset_group);
             }
+        }
+        if let Some(report) = &site_files_report {
+            print_site_files_report(report);
+        }
+        if let Some(err) = &site_files_error {
+            println!("\n🧭 Site Files");
+            println!("  ─────────────────────────────────────────────────────────");
+            println!("    ❌ Failed to analyze robots/sitemaps: {}", err);
+            println!();
         }
     }
 
@@ -236,6 +264,43 @@ async fn run_audit(
     browser.shutdown().await.ok();
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EffectiveToggles {
+    assets: bool,
+    perf: bool,
+    contrast: bool,
+    site_files: bool,
+}
+
+fn resolve_effective_toggles(
+    mode: AnalysisMode,
+    include_assets: bool,
+    include_perf: bool,
+    include_contrast: bool,
+    include_site_files: bool,
+) -> EffectiveToggles {
+    match mode {
+        AnalysisMode::Full => EffectiveToggles {
+            assets: true,
+            perf: true,
+            contrast: true,
+            site_files: true,
+        },
+        AnalysisMode::Custom => EffectiveToggles {
+            assets: include_assets,
+            perf: include_perf,
+            contrast: include_contrast,
+            site_files: include_site_files,
+        },
+        AnalysisMode::SeoOnly => EffectiveToggles {
+            assets: false,
+            perf: false,
+            contrast: false,
+            site_files: false,
+        },
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -909,6 +974,39 @@ fn asset_group_label(group: AssetGroup) -> &'static str {
     }
 }
 
+fn print_site_files_report(report: &pagelens_core::site_files::SiteFilesReport) {
+    println!("\n🧭 Site Files");
+    println!("  ─────────────────────────────────────────────────────────");
+    println!("  Base URL: {}", report.base_url);
+    println!(
+        "  robots.txt: {}{}",
+        if report.robots.found { "found" } else { "missing" },
+        report
+            .robots
+            .status
+            .map(|s| format!(" (status {})", s))
+            .unwrap_or_default()
+    );
+    println!("  Sitemaps checked: {}", report.sitemaps.len());
+    println!("  Sitemap URLs discovered: {}", report.sitemap_urls.len());
+
+    if report.issues.is_empty() {
+        println!("  ✅ No robots/sitemap issues detected\n");
+        return;
+    }
+
+    println!("  Issues ({})", report.issues.len());
+    for issue in &report.issues {
+        let icon = match issue.severity {
+            pagelens_core::seo::Severity::Error => "❌",
+            pagelens_core::seo::Severity::Warning => "⚠️ ",
+            pagelens_core::seo::Severity::Info => "ℹ️ ",
+        };
+        println!("    {} [{}] {}", icon, issue.category, issue.message);
+    }
+    println!();
+}
+
 fn parse_headers(raw_headers: &[String]) -> Result<HashMap<String, String>, String> {
     let mut headers = HashMap::new();
     for raw in raw_headers {
@@ -1072,7 +1170,8 @@ fn print_results(report: &pagelens_core::seo::SeoReport) {
 mod tests {
     use super::{
         analyze_contrast, build_performance_report, parse_content_range_total, parse_headers,
-        parse_rgb_triplet, AnalysisMode, AssetSizeEntry, AssetSort, AssetType,
+        parse_rgb_triplet, resolve_effective_toggles, AnalysisMode, AssetSizeEntry, AssetSort,
+        AssetType,
     };
     use clap::ValueEnum;
 
@@ -1207,5 +1306,23 @@ mod tests {
     fn analysis_mode_defaults_include_full() {
         let variants = AnalysisMode::value_variants();
         assert!(variants.contains(&AnalysisMode::Full));
+    }
+
+    #[test]
+    fn full_mode_enables_site_files_checks() {
+        let toggles = resolve_effective_toggles(AnalysisMode::Full, false, false, false, false);
+        assert!(toggles.assets);
+        assert!(toggles.perf);
+        assert!(toggles.contrast);
+        assert!(toggles.site_files);
+    }
+
+    #[test]
+    fn seo_only_disables_optional_checks() {
+        let toggles = resolve_effective_toggles(AnalysisMode::SeoOnly, true, true, true, true);
+        assert!(!toggles.assets);
+        assert!(!toggles.perf);
+        assert!(!toggles.contrast);
+        assert!(!toggles.site_files);
     }
 }
