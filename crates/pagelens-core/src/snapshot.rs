@@ -43,6 +43,8 @@ pub struct MainResourceNetwork {
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct NetworkRequestRecord {
     pub url: String,
+    pub redirect_from_url: Option<String>,
+    pub redirect_status_code: Option<u16>,
     pub resource_type: Option<String>,
     pub status_code: Option<u16>,
     pub encoded_data_length: Option<f64>,

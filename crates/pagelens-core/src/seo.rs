@@ -862,6 +862,79 @@ impl SeoAnalyzer {
             );
         }
 
+        let mut redirect_hops: Vec<(String, String, Option<u16>, Option<f64>, Option<f64>)> =
+            snapshot
+                .network_requests
+                .iter()
+                .filter_map(|request| {
+                    if !request.was_redirect.unwrap_or(false) {
+                        return None;
+                    }
+
+                    let from = request.redirect_from_url.clone()?;
+                    Some((
+                        from,
+                        request.url.clone(),
+                        request.redirect_status_code,
+                        request.request_start_time_s,
+                        request.end_time_s,
+                    ))
+                })
+                .collect();
+
+        redirect_hops.sort_by(|a, b| a.3.partial_cmp(&b.3).unwrap_or(std::cmp::Ordering::Equal));
+
+        if !redirect_hops.is_empty() {
+            let mut chain_urls: Vec<String> = vec![redirect_hops[0].0.clone()];
+            for (_, to, _, _, _) in &redirect_hops {
+                if chain_urls.last().map(|v| v != to).unwrap_or(true) {
+                    chain_urls.push(to.clone());
+                }
+            }
+
+            let hops = redirect_hops.len();
+            let start = redirect_hops.first().and_then(|hop| hop.3);
+            let end = redirect_hops.last().and_then(|hop| hop.4);
+            let duration_suffix = match (start, end) {
+                (Some(s), Some(e)) if e >= s => {
+                    format!(" in {}ms", ((e - s) * 1000.0).round() as u64)
+                }
+                _ => String::new(),
+            };
+            let status_chain = redirect_hops
+                .iter()
+                .filter_map(|(_, _, status, _, _)| status.map(|s| s.to_string()))
+                .collect::<Vec<_>>()
+                .join(" -> ");
+
+            report.add_issue(
+                Severity::Info,
+                "performance",
+                &format!(
+                    "Redirect chain ({} hop(s){}): {}{}",
+                    hops,
+                    duration_suffix,
+                    chain_urls.join(" -> "),
+                    if status_chain.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" [status: {}]", status_chain)
+                    }
+                ),
+            );
+
+            if hops > 1 {
+                report.add_issue(
+                    Severity::Warning,
+                    "performance",
+                    &format!(
+                        "Redirect chain has {} hops; consider reducing to a single redirect",
+                        hops
+                    ),
+                );
+            }
+        }
+
         let uncompressed_count = snapshot
             .network_requests
             .iter()
@@ -2051,6 +2124,8 @@ mod tests {
             .network_requests
             .push(crate::snapshot::NetworkRequestRecord {
                 url: "http://cdn.example.com/app.js".to_string(),
+                redirect_from_url: None,
+                redirect_status_code: None,
                 resource_type: Some("Script".to_string()),
                 status_code: Some(200),
                 encoded_data_length: Some(12_345.0),
@@ -2069,6 +2144,8 @@ mod tests {
             .network_requests
             .push(crate::snapshot::NetworkRequestRecord {
                 url: "https://example.com/redirected".to_string(),
+                redirect_from_url: Some("https://example.com/original".to_string()),
+                redirect_status_code: Some(301),
                 resource_type: Some("Document".to_string()),
                 status_code: Some(301),
                 encoded_data_length: Some(900.0),
@@ -2087,6 +2164,8 @@ mod tests {
             .network_requests
             .push(crate::snapshot::NetworkRequestRecord {
                 url: "https://example.com/fail.css".to_string(),
+                redirect_from_url: None,
+                redirect_status_code: None,
                 resource_type: Some("Stylesheet".to_string()),
                 status_code: None,
                 encoded_data_length: None,
@@ -2133,6 +2212,8 @@ mod tests {
             .network_requests
             .push(crate::snapshot::NetworkRequestRecord {
                 url: "https://example.com/".to_string(),
+                redirect_from_url: None,
+                redirect_status_code: None,
                 resource_type: Some("Document".to_string()),
                 status_code: Some(200),
                 encoded_data_length: Some(15_000.0),
@@ -2151,6 +2232,8 @@ mod tests {
             .network_requests
             .push(crate::snapshot::NetworkRequestRecord {
                 url: "https://example.com/app.js".to_string(),
+                redirect_from_url: None,
+                redirect_status_code: None,
                 resource_type: Some("Script".to_string()),
                 status_code: Some(200),
                 encoded_data_length: Some(120_000.0),
@@ -2175,6 +2258,67 @@ mod tests {
             .issues
             .iter()
             .any(|i| i.category == "performance" && i.message.contains("Critical path candidate")));
+    }
+
+    #[test]
+    fn analyze_redirect_chain_details_and_hop_warning() {
+        let html = r#"
+            <!doctype html>
+            <html><head><meta charset="utf-8"><title>Redirect Chain Test</title></head>
+            <body><h1>Title</h1></body></html>
+        "#;
+
+        let mut snapshot = snapshot_with_html(html);
+        snapshot
+            .network_requests
+            .push(crate::snapshot::NetworkRequestRecord {
+                url: "https://example.com/b".to_string(),
+                redirect_from_url: Some("https://example.com/a".to_string()),
+                redirect_status_code: Some(301),
+                resource_type: Some("Document".to_string()),
+                status_code: Some(301),
+                encoded_data_length: Some(800.0),
+                from_cache: Some(false),
+                was_redirect: Some(true),
+                failed: Some(false),
+                failure_text: None,
+                content_encoding: Some("gzip".to_string()),
+                mime_type: Some("text/html".to_string()),
+                request_start_time_s: Some(10.0),
+                response_start_time_s: Some(10.02),
+                end_time_s: Some(10.05),
+                duration_ms: Some(50.0),
+            });
+        snapshot
+            .network_requests
+            .push(crate::snapshot::NetworkRequestRecord {
+                url: "https://example.com/c".to_string(),
+                redirect_from_url: Some("https://example.com/b".to_string()),
+                redirect_status_code: Some(302),
+                resource_type: Some("Document".to_string()),
+                status_code: Some(302),
+                encoded_data_length: Some(900.0),
+                from_cache: Some(false),
+                was_redirect: Some(true),
+                failed: Some(false),
+                failure_text: None,
+                content_encoding: Some("gzip".to_string()),
+                mime_type: Some("text/html".to_string()),
+                request_start_time_s: Some(10.07),
+                response_start_time_s: Some(10.09),
+                end_time_s: Some(10.18),
+                duration_ms: Some(110.0),
+            });
+
+        let report = SeoAnalyzer::analyze(&snapshot);
+
+        assert!(report.issues.iter().any(|i| {
+            i.category == "performance" && i.message.contains("Redirect chain (2 hop(s)")
+        }));
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.category == "performance" && i.message.contains("has 2 hops")));
     }
 
     #[test]
