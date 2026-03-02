@@ -193,7 +193,20 @@ async fn svelte_seo_test_page_has_issues() {
     // Check that issues have valid categories
     for issue in &report.issues {
         assert!(
-            ["meta", "open-graph", "headings", "images", "canonical", "structured-data"]
+            [
+                "meta",
+                "open-graph",
+                "headings",
+                "images",
+                "canonical",
+                "structured-data",
+                "seo",
+                "hreflang",
+                "links",
+                "accessibility",
+                "best-practices",
+                "performance",
+            ]
                 .contains(&issue.category.as_str()),
             "Issue category '{}' is not a known category",
             issue.category

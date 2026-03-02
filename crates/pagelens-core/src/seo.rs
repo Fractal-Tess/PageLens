@@ -3,6 +3,7 @@
 use crate::snapshot::Snapshot;
 use scraper::{Html, Selector};
 use std::sync::LazyLock;
+use url::Url;
 
 // Only keep regex for JSON parsing (schema type extraction from JSON-LD)
 static SCHEMA_TYPE_REGEX: LazyLock<regex::Regex> =
@@ -24,6 +25,19 @@ static LINK_SELECTOR: LazyLock<Selector> =
     LazyLock::new(|| Selector::parse("link").expect("valid link selector"));
 static HTML_SELECTOR: LazyLock<Selector> =
     LazyLock::new(|| Selector::parse("html").expect("valid html selector"));
+static ANCHOR_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("a").expect("valid anchor selector"));
+static FORM_CONTROL_SELECTOR: LazyLock<Selector> = LazyLock::new(|| {
+    Selector::parse("input, select, textarea").expect("valid form control selector")
+});
+static LABEL_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("label").expect("valid label selector"));
+static SCRIPT_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("script[src]").expect("valid script selector"));
+static TARGET_BLANK_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("a[target=\"_blank\"]").expect("valid target blank selector"));
+static ROBOTS_USER_AGENT_NAMES: &[&str] = &["robots", "googlebot", "bingbot", "duckduckbot"];
+static ROBOTS_BLOCKLIST: &[&str] = &["noindex", "none"];
 
 /// Severity level for SEO issues.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -228,6 +242,8 @@ impl SeoAnalyzer {
         // Analyze meta tags
         Self::analyze_meta(&mut report, &document);
 
+        Self::analyze_document_basics(&mut report, snapshot);
+
         // Analyze Open Graph
         Self::analyze_open_graph(&mut report, &document);
 
@@ -235,13 +251,33 @@ impl SeoAnalyzer {
         Self::analyze_twitter_cards(&mut report, &document);
 
         // Analyze canonical URL
-        Self::analyze_canonical(&mut report, &document);
+        Self::analyze_canonical(&mut report, &document, &snapshot.url);
+
+        Self::analyze_hreflang(&mut report, &document);
 
         // Analyze headings
         Self::analyze_headings(&mut report, &document);
 
         // Analyze images
         Self::analyze_images(&mut report, &document);
+
+        Self::analyze_links(&mut report, &document);
+
+        Self::analyze_form_controls(&mut report, &document);
+
+        Self::analyze_crawlability(&mut report, &document);
+
+        Self::analyze_network_artifacts(&mut report, snapshot);
+
+        Self::analyze_network_request_records(&mut report, snapshot);
+
+        Self::analyze_best_practices(&mut report, &document, snapshot);
+
+        Self::analyze_performance(&mut report, snapshot);
+
+        Self::analyze_accessibility_styles(&mut report, snapshot);
+
+        Self::analyze_media_optimization(&mut report, &document);
 
         // Analyze structured data
         Self::analyze_structured_data(&mut report, &document);
@@ -383,15 +419,90 @@ impl SeoAnalyzer {
     }
 
     /// Analyze canonical URL.
-    fn analyze_canonical(report: &mut SeoReport, document: &Html) {
+    fn analyze_canonical(report: &mut SeoReport, document: &Html, page_url: &str) {
         // Look for <link rel="canonical" href="...">
-        if let Some(href) = Self::get_link_rel(document, "canonical") {
-            report.canonical_url = Some(href);
-        } else {
+        let canonical_links = Self::get_link_rels(document, "canonical");
+
+        if canonical_links.is_empty() {
             report.add_issue(
                 Severity::Info,
                 "canonical",
                 "Missing canonical URL (recommended for SEO)",
+            );
+            return;
+        }
+
+        let mut unique = std::collections::HashSet::new();
+        for href in &canonical_links {
+            unique.insert(href.clone());
+        }
+
+        if unique.len() > 1 {
+            report.add_issue(
+                Severity::Warning,
+                "canonical",
+                "Multiple conflicting canonical URLs found",
+            );
+        }
+
+        if let Some(primary) = canonical_links.first() {
+            report.canonical_url = Some(primary.clone());
+
+            if Url::parse(primary).is_err() {
+                report.add_issue(
+                    Severity::Warning,
+                    "canonical",
+                    "Canonical URL is not absolute",
+                );
+            }
+
+            if let (Ok(page), Ok(canonical)) = (Url::parse(page_url), Url::parse(primary)) {
+                if page.origin() == canonical.origin()
+                    && page.path() != "/"
+                    && canonical.path() == "/"
+                {
+                    report.add_issue(
+                        Severity::Info,
+                        "canonical",
+                        "Canonical URL points to site root from a non-root page",
+                    );
+                }
+            }
+        }
+    }
+
+    fn analyze_hreflang(report: &mut SeoReport, document: &Html) {
+        let mut invalid_count = 0usize;
+
+        for link in document.select(&LINK_SELECTOR) {
+            let rel = link.value().attr("rel").unwrap_or("");
+            let is_alternate = rel
+                .split_ascii_whitespace()
+                .any(|token| token.eq_ignore_ascii_case("alternate"));
+            if !is_alternate {
+                continue;
+            }
+
+            let Some(hreflang) = link.value().attr("hreflang") else {
+                continue;
+            };
+
+            let href = link.value().attr("href").unwrap_or("");
+            if href.is_empty() || Url::parse(href).is_err() {
+                invalid_count += 1;
+                continue;
+            }
+
+            if !Self::is_expected_hreflang_code(hreflang) {
+                invalid_count += 1;
+            }
+        }
+
+        if invalid_count > 0 {
+            report.add_issue(
+                Severity::Warning,
+                "hreflang",
+                &format!("Found {} invalid hreflang link(s)", invalid_count),
             );
         }
     }
@@ -476,6 +587,526 @@ impl SeoAnalyzer {
                     );
                 }
             }
+        }
+    }
+
+    fn analyze_links(report: &mut SeoReport, document: &Html) {
+        for anchor in document.select(&ANCHOR_SELECTOR) {
+            let href = anchor.value().attr("href").unwrap_or("").trim();
+            if href.is_empty() || href.eq_ignore_ascii_case("javascript:void(0)") {
+                report.add_issue(
+                    Severity::Info,
+                    "links",
+                    "Found anchor with non-crawlable href",
+                );
+            }
+
+            let text = anchor.text().collect::<String>().trim().to_string();
+            let has_accessible_label = anchor
+                .value()
+                .attr("aria-label")
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false)
+                || anchor
+                    .value()
+                    .attr("title")
+                    .map(|v| !v.trim().is_empty())
+                    .unwrap_or(false);
+
+            if text.is_empty() && !has_accessible_label {
+                report.add_issue(
+                    Severity::Warning,
+                    "links",
+                    "Found link without descriptive text or accessible label",
+                );
+            }
+        }
+    }
+
+    fn analyze_form_controls(report: &mut SeoReport, document: &Html) {
+        let mut labels_for: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for label in document.select(&LABEL_SELECTOR) {
+            if let Some(for_attr) = label.value().attr("for") {
+                if !for_attr.trim().is_empty() {
+                    labels_for.insert(for_attr.to_string());
+                }
+            }
+        }
+
+        for control in document.select(&FORM_CONTROL_SELECTOR) {
+            let control_name = control.value().name.local.to_string();
+            let id = control.value().attr("id").unwrap_or("").trim().to_string();
+            let has_label_for = !id.is_empty() && labels_for.contains(&id);
+            let has_aria = control
+                .value()
+                .attr("aria-label")
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false)
+                || control
+                    .value()
+                    .attr("aria-labelledby")
+                    .map(|v| !v.trim().is_empty())
+                    .unwrap_or(false);
+
+            if !has_label_for && !has_aria {
+                report.add_issue(
+                    Severity::Warning,
+                    "accessibility",
+                    &format!("Found unlabeled form control: {}", control_name),
+                );
+            }
+        }
+    }
+
+    fn analyze_document_basics(report: &mut SeoReport, snapshot: &Snapshot) {
+        let trimmed = snapshot.html.trim_start();
+        if !trimmed.to_ascii_lowercase().starts_with("<!doctype html") {
+            report.add_issue(
+                Severity::Warning,
+                "best-practices",
+                "Document is missing an HTML5 doctype",
+            );
+        }
+
+        if let Some(charset_index) = Self::find_case_insensitive(&snapshot.html, "<meta charset") {
+            if charset_index > 1024 {
+                report.add_issue(
+                    Severity::Warning,
+                    "meta",
+                    "Charset declaration appears after the first 1024 bytes",
+                );
+            }
+        }
+    }
+
+    fn analyze_crawlability(report: &mut SeoReport, document: &Html) {
+        for meta in document.select(&META_SELECTOR) {
+            let name = meta
+                .value()
+                .attr("name")
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase();
+            if !ROBOTS_USER_AGENT_NAMES.contains(&name.as_str()) {
+                continue;
+            }
+
+            let content = meta.value().attr("content").unwrap_or("");
+            let has_blocking_directive = content
+                .split(',')
+                .map(|d| d.trim().to_ascii_lowercase())
+                .any(|directive| ROBOTS_BLOCKLIST.contains(&directive.as_str()));
+
+            if has_blocking_directive {
+                let severity = if name == "robots" {
+                    Severity::Error
+                } else {
+                    Severity::Warning
+                };
+                report.add_issue(
+                    severity,
+                    "seo",
+                    &format!("Found blocking indexing directive in {} meta tag", name),
+                );
+            }
+        }
+    }
+
+    fn analyze_network_artifacts(report: &mut SeoReport, snapshot: &Snapshot) {
+        let network = &snapshot.main_resource_network;
+
+        if let Some(status) = network.status_code {
+            if status >= 400 {
+                report.add_issue(
+                    Severity::Error,
+                    "seo",
+                    &format!("Main resource returned unsuccessful status code {}", status),
+                );
+            }
+        } else if network.fetch_error.is_some() {
+            report.add_issue(
+                Severity::Info,
+                "best-practices",
+                "Unable to collect main resource status and headers",
+            );
+        }
+
+        if Self::header_contains_token(&network.headers, "x-robots-tag", "noindex")
+            || Self::header_contains_token(&network.headers, "x-robots-tag", "none")
+        {
+            report.add_issue(
+                Severity::Error,
+                "seo",
+                "X-Robots-Tag blocks indexing for this page",
+            );
+        }
+
+        if let Some(content_type) = network.headers.get("content-type") {
+            if content_type.contains("text/html") {
+                let cache_control = network
+                    .headers
+                    .get("cache-control")
+                    .map(|v| v.to_ascii_lowercase())
+                    .unwrap_or_default();
+
+                if cache_control.is_empty() {
+                    report.add_issue(
+                        Severity::Info,
+                        "performance",
+                        "Main resource is missing cache-control header",
+                    );
+                } else if cache_control.contains("no-store") {
+                    report.add_issue(
+                        Severity::Info,
+                        "performance",
+                        "Main resource disables caching via cache-control: no-store",
+                    );
+                }
+            }
+        }
+
+        if network.headers.get("content-encoding").is_none() {
+            report.add_issue(
+                Severity::Info,
+                "performance",
+                "Main resource is missing content-encoding (gzip/brotli)",
+            );
+        }
+
+        if snapshot.url.starts_with("https://") {
+            let missing_security_headers = [
+                ("content-security-policy", "CSP"),
+                ("strict-transport-security", "HSTS"),
+                ("x-content-type-options", "X-Content-Type-Options"),
+                ("x-frame-options", "X-Frame-Options"),
+                ("referrer-policy", "Referrer-Policy"),
+            ];
+
+            for (header, label) in missing_security_headers {
+                if network
+                    .headers
+                    .get(header)
+                    .map(|v| v.trim().is_empty())
+                    .unwrap_or(true)
+                {
+                    report.add_issue(
+                        Severity::Info,
+                        "best-practices",
+                        &format!("Missing security header: {}", label),
+                    );
+                }
+            }
+        }
+    }
+
+    fn analyze_network_request_records(report: &mut SeoReport, snapshot: &Snapshot) {
+        if snapshot.network_requests.is_empty() {
+            return;
+        }
+
+        if snapshot.url.starts_with("https://")
+            && snapshot
+                .network_requests
+                .iter()
+                .any(|request| request.url.starts_with("http://"))
+        {
+            report.add_issue(
+                Severity::Warning,
+                "best-practices",
+                "Detected mixed content request in network activity",
+            );
+        }
+
+        let redirect_count = snapshot
+            .network_requests
+            .iter()
+            .filter(|request| request.was_redirect.unwrap_or(false))
+            .count();
+        if redirect_count > 0 {
+            report.add_issue(
+                Severity::Info,
+                "performance",
+                &format!(
+                    "Detected {} redirect network request(s); reduce redirects for faster loads",
+                    redirect_count
+                ),
+            );
+        }
+
+        let uncompressed_count = snapshot
+            .network_requests
+            .iter()
+            .filter(|request| {
+                let Some(mime) = request.mime_type.as_deref() else {
+                    return false;
+                };
+
+                let text_like = mime.starts_with("text/")
+                    || mime.contains("javascript")
+                    || mime.contains("json")
+                    || mime.contains("xml");
+
+                text_like
+                    && request.encoded_data_length.unwrap_or(0.0) > 1024.0
+                    && request
+                        .content_encoding
+                        .as_deref()
+                        .map(|v| v.trim().is_empty())
+                        .unwrap_or(true)
+            })
+            .count();
+
+        if uncompressed_count > 0 {
+            report.add_issue(
+                Severity::Info,
+                "performance",
+                &format!(
+                    "Found {} text request(s) without compression",
+                    uncompressed_count
+                ),
+            );
+        }
+
+        let failed_count = snapshot
+            .network_requests
+            .iter()
+            .filter(|request| request.failed.unwrap_or(false))
+            .count();
+        if failed_count > 0 {
+            report.add_issue(
+                Severity::Warning,
+                "best-practices",
+                &format!("Detected {} failed network request(s)", failed_count),
+            );
+        }
+    }
+
+    fn analyze_best_practices(report: &mut SeoReport, document: &Html, snapshot: &Snapshot) {
+        if Self::should_check_secure_transport(&snapshot.url) && snapshot.url.starts_with("http://")
+        {
+            report.add_issue(
+                Severity::Warning,
+                "best-practices",
+                "Page is served over HTTP instead of HTTPS",
+            );
+        }
+
+        if snapshot.url.starts_with("https://") {
+            let mixed_content = snapshot
+                .referenced_assets
+                .javascript
+                .iter()
+                .chain(snapshot.referenced_assets.stylesheets.iter())
+                .chain(snapshot.referenced_assets.media.iter())
+                .any(|url| url.starts_with("http://"));
+
+            if mixed_content {
+                report.add_issue(
+                    Severity::Error,
+                    "best-practices",
+                    "Found mixed content: HTTPS page loads HTTP assets",
+                );
+            }
+        }
+
+        for link in document.select(&TARGET_BLANK_SELECTOR) {
+            let rel = link.value().attr("rel").unwrap_or("").to_ascii_lowercase();
+            let has_protection = rel
+                .split_ascii_whitespace()
+                .any(|token| token == "noopener" || token == "noreferrer");
+
+            if !has_protection {
+                report.add_issue(
+                    Severity::Warning,
+                    "best-practices",
+                    "Found target=\"_blank\" link without rel=noopener/noreferrer",
+                );
+            }
+        }
+
+        let blocking_scripts = document
+            .select(&SCRIPT_SELECTOR)
+            .filter(|script| {
+                script.value().attr("async").is_none() && script.value().attr("defer").is_none()
+            })
+            .count();
+
+        if blocking_scripts > 0 {
+            report.add_issue(
+                Severity::Info,
+                "best-practices",
+                &format!(
+                    "Found {} external script(s) without async/defer",
+                    blocking_scripts
+                ),
+            );
+        }
+
+        let has_meta_refresh = document.select(&META_SELECTOR).any(|meta| {
+            let http_equiv = meta.value().attr("http-equiv").unwrap_or("");
+            let content = meta.value().attr("content").unwrap_or("").trim();
+            http_equiv.eq_ignore_ascii_case("refresh") && !content.is_empty()
+        });
+
+        if has_meta_refresh {
+            report.add_issue(
+                Severity::Info,
+                "best-practices",
+                "Found meta refresh redirect; prefer HTTP redirects",
+            );
+        }
+    }
+
+    fn analyze_performance(report: &mut SeoReport, snapshot: &Snapshot) {
+        let nav_start = snapshot.performance_timing.navigation_start;
+        if nav_start == 0 {
+            return;
+        }
+
+        if let Some(ttfb) =
+            Self::timing_delta(snapshot.performance_timing.response_start, nav_start)
+        {
+            if ttfb > 1800 {
+                report.add_issue(
+                    Severity::Error,
+                    "performance",
+                    &format!("High TTFB detected ({}ms)", ttfb),
+                );
+            } else if ttfb > 800 {
+                report.add_issue(
+                    Severity::Warning,
+                    "performance",
+                    &format!("Slow TTFB detected ({}ms)", ttfb),
+                );
+            }
+        }
+
+        if let Some(fcp) = Self::timing_delta(
+            snapshot.performance_timing.first_contentful_paint,
+            nav_start,
+        ) {
+            if fcp > 5000 {
+                report.add_issue(
+                    Severity::Error,
+                    "performance",
+                    &format!("Very slow first contentful paint ({}ms)", fcp),
+                );
+            } else if fcp > 3000 {
+                report.add_issue(
+                    Severity::Warning,
+                    "performance",
+                    &format!("Slow first contentful paint ({}ms)", fcp),
+                );
+            }
+        }
+
+        if let Some(load) = Self::timing_delta(snapshot.performance_timing.load_complete, nav_start)
+        {
+            if load > 10000 {
+                report.add_issue(
+                    Severity::Warning,
+                    "performance",
+                    &format!("Page load completed very late ({}ms)", load),
+                );
+            } else if load > 5000 {
+                report.add_issue(
+                    Severity::Info,
+                    "performance",
+                    &format!("Page load completed after {}ms", load),
+                );
+            }
+        }
+    }
+
+    fn analyze_media_optimization(report: &mut SeoReport, document: &Html) {
+        let mut total_images = 0usize;
+        let mut lazy_images = 0usize;
+        let mut unsized_images = 0usize;
+
+        for img in document.select(&IMG_SELECTOR) {
+            if img.value().attr("src").unwrap_or("").trim().is_empty() {
+                continue;
+            }
+
+            total_images += 1;
+
+            if img
+                .value()
+                .attr("loading")
+                .map(|v| v.eq_ignore_ascii_case("lazy"))
+                .unwrap_or(false)
+            {
+                lazy_images += 1;
+            }
+
+            let has_width = img.value().attr("width").is_some();
+            let has_height = img.value().attr("height").is_some();
+            if !has_width || !has_height {
+                unsized_images += 1;
+            }
+        }
+
+        if total_images >= 4 && lazy_images == 0 {
+            report.add_issue(
+                Severity::Info,
+                "performance",
+                "Page has multiple images but none use loading=lazy",
+            );
+        }
+
+        if unsized_images > 0 {
+            report.add_issue(
+                Severity::Warning,
+                "performance",
+                &format!(
+                    "Found {} image(s) without explicit width/height attributes",
+                    unsized_images
+                ),
+            );
+        }
+    }
+
+    fn analyze_accessibility_styles(report: &mut SeoReport, snapshot: &Snapshot) {
+        if snapshot.computed_styles.is_empty() {
+            return;
+        }
+
+        let mut low_contrast_count = 0usize;
+
+        for style in &snapshot.computed_styles {
+            let Some(fg) = style.color.as_deref().and_then(Self::parse_color) else {
+                continue;
+            };
+            let Some(bg) = style
+                .background_color
+                .as_deref()
+                .and_then(Self::parse_color)
+            else {
+                continue;
+            };
+
+            let ratio = Self::contrast_ratio(fg, bg);
+            let min_ratio =
+                if Self::is_large_text(style.font_size.as_deref(), style.font_weight.as_deref()) {
+                    3.0
+                } else {
+                    4.5
+                };
+
+            if ratio < min_ratio {
+                low_contrast_count += 1;
+            }
+        }
+
+        if low_contrast_count > 0 {
+            report.add_issue(
+                Severity::Warning,
+                "accessibility",
+                &format!(
+                    "Found {} element(s) with insufficient text contrast",
+                    low_contrast_count
+                ),
+            );
         }
     }
 
@@ -583,18 +1214,154 @@ impl SeoAnalyzer {
         Self::get_meta_name(document, key).or_else(|| Self::get_meta_property(document, key))
     }
 
-    /// Get href from link tag with specific rel attribute.
-    fn get_link_rel(document: &Html, rel: &str) -> Option<String> {
+    fn get_link_rels(document: &Html, rel: &str) -> Vec<String> {
         document
             .select(&LINK_SELECTOR)
-            .find(|el| {
+            .filter(|el| {
                 el.value()
                     .attr("rel")
-                    .map(|r| r.eq_ignore_ascii_case(rel))
+                    .map(|rels| {
+                        rels.split_ascii_whitespace()
+                            .any(|token| token.eq_ignore_ascii_case(rel))
+                    })
                     .unwrap_or(false)
             })
-            .and_then(|el| el.value().attr("href"))
-            .map(|s| s.to_string())
+            .filter_map(|el| el.value().attr("href"))
+            .map(std::string::ToString::to_string)
+            .collect()
+    }
+
+    fn is_expected_hreflang_code(hreflang: &str) -> bool {
+        if hreflang.eq_ignore_ascii_case("x-default") {
+            return true;
+        }
+
+        let mut parts = hreflang.split('-');
+        let Some(lang) = parts.next() else {
+            return false;
+        };
+
+        if lang.len() < 2 || lang.len() > 3 || !lang.chars().all(|c| c.is_ascii_alphabetic()) {
+            return false;
+        }
+
+        parts.all(|part| {
+            let len = part.len();
+            (2..=8).contains(&len) && part.chars().all(|c| c.is_ascii_alphanumeric())
+        })
+    }
+
+    fn timing_delta(value: Option<u64>, navigation_start: u64) -> Option<u64> {
+        value.and_then(|v| v.checked_sub(navigation_start))
+    }
+
+    fn find_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
+        haystack
+            .to_ascii_lowercase()
+            .find(&needle.to_ascii_lowercase())
+    }
+
+    fn parse_color(value: &str) -> Option<(u8, u8, u8)> {
+        let v = value.trim();
+        if let Some(hex) = v.strip_prefix('#') {
+            return match hex.len() {
+                3 => {
+                    let r = u8::from_str_radix(&hex[0..1].repeat(2), 16).ok()?;
+                    let g = u8::from_str_radix(&hex[1..2].repeat(2), 16).ok()?;
+                    let b = u8::from_str_radix(&hex[2..3].repeat(2), 16).ok()?;
+                    Some((r, g, b))
+                }
+                6 => {
+                    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+                    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+                    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+                    Some((r, g, b))
+                }
+                _ => None,
+            };
+        }
+
+        let open = v.find('(')?;
+        let close = v.rfind(')')?;
+        if close <= open {
+            return None;
+        }
+
+        let body = &v[open + 1..close];
+        let channels: Vec<&str> = body.split(',').collect();
+        if channels.len() < 3 {
+            return None;
+        }
+
+        let r = channels[0].trim().parse::<u8>().ok()?;
+        let g = channels[1].trim().parse::<u8>().ok()?;
+        let b = channels[2].trim().parse::<u8>().ok()?;
+        Some((r, g, b))
+    }
+
+    fn is_large_text(font_size: Option<&str>, font_weight: Option<&str>) -> bool {
+        let size = font_size
+            .and_then(|v| v.trim_end_matches("px").trim().parse::<f64>().ok())
+            .unwrap_or(0.0);
+        let weight = font_weight
+            .and_then(|v| v.trim().parse::<u16>().ok())
+            .unwrap_or(400);
+
+        size >= 18.0 || (size >= 14.0 && weight >= 700)
+    }
+
+    fn relative_luminance((r, g, b): (u8, u8, u8)) -> f64 {
+        fn to_linear(channel: u8) -> f64 {
+            let c = channel as f64 / 255.0;
+            if c <= 0.039_28 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        }
+
+        let r = to_linear(r);
+        let g = to_linear(g);
+        let b = to_linear(b);
+        0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+
+    fn contrast_ratio(fg: (u8, u8, u8), bg: (u8, u8, u8)) -> f64 {
+        let l1 = Self::relative_luminance(fg);
+        let l2 = Self::relative_luminance(bg);
+        let (lighter, darker) = if l1 >= l2 { (l1, l2) } else { (l2, l1) };
+        (lighter + 0.05) / (darker + 0.05)
+    }
+
+    fn header_contains_token(
+        headers: &std::collections::HashMap<String, String>,
+        header_name: &str,
+        token: &str,
+    ) -> bool {
+        headers
+            .get(header_name)
+            .map(|value| {
+                value
+                    .split(',')
+                    .map(|part| part.trim().to_ascii_lowercase())
+                    .any(|part| part == token)
+            })
+            .unwrap_or(false)
+    }
+
+    fn should_check_secure_transport(page_url: &str) -> bool {
+        let Ok(url) = Url::parse(page_url) else {
+            return false;
+        };
+
+        let Some(host) = url.host_str() else {
+            return false;
+        };
+
+        !host.eq_ignore_ascii_case("localhost")
+            && host != "127.0.0.1"
+            && host != "::1"
+            && !host.ends_with(".local")
     }
 }
 
@@ -653,6 +1420,8 @@ mod tests {
             },
             computed_styles: Vec::new(),
             referenced_assets: crate::snapshot::ReferencedAssets::default(),
+            main_resource_network: crate::snapshot::MainResourceNetwork::default(),
+            network_requests: Vec::new(),
             capture_issues: Vec::new(),
         }
     }
@@ -884,6 +1653,270 @@ mod tests {
         let custom_report = SeoAnalyzer::analyze_with_config(&snapshot, &custom);
 
         assert!(custom_report.score < default_report.score);
+    }
+
+    #[test]
+    fn analyze_invalid_hreflang_and_unlabeled_controls() {
+        let html = r#"
+            <html><head>
+                <meta charset="utf-8">
+                <title>Accessibility and Hreflang Test</title>
+                <link rel="alternate" hreflang="english" href="/relative">
+            </head>
+            <body>
+                <h1>Title</h1>
+                <form>
+                    <input id="email" type="email">
+                </form>
+            </body></html>
+        "#;
+
+        let snapshot = snapshot_with_html(html);
+        let report = SeoAnalyzer::analyze(&snapshot);
+
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.category == "hreflang" && i.message.contains("invalid hreflang")));
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|i| i.category == "accessibility"
+                    && i.message.contains("unlabeled form control"))
+        );
+    }
+
+    #[test]
+    fn analyze_best_practices_and_performance_heuristics() {
+        let html = r#"
+            <html><head>
+                <meta charset="utf-8">
+                <title>Best Practices Test</title>
+                <script src="/app.js"></script>
+            </head>
+            <body>
+                <h1>Title</h1>
+                <a href="https://example.com" target="_blank">external</a>
+            </body></html>
+        "#;
+
+        let mut snapshot = snapshot_with_html(html);
+        snapshot.url = "https://example.com/page".to_string();
+        snapshot.performance_timing.navigation_start = 100;
+        snapshot.performance_timing.response_start = Some(2300);
+        snapshot.performance_timing.first_contentful_paint = Some(4200);
+        snapshot.performance_timing.load_complete = Some(12050);
+        snapshot
+            .referenced_assets
+            .stylesheets
+            .push("http://cdn.example.com/site.css".to_string());
+
+        let report = SeoAnalyzer::analyze(&snapshot);
+
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.category == "best-practices" && i.message.contains("mixed content")));
+        assert!(report.issues.iter().any(|i| {
+            i.category == "best-practices" && i.message.contains("target=\"_blank\"")
+        }));
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.category == "performance" && i.message.contains("TTFB")));
+    }
+
+    #[test]
+    fn analyze_crawlability_and_document_basics_checks() {
+        let mut html = String::new();
+        html.push_str("<html><head>");
+        html.push_str(&" ".repeat(1100));
+        html.push_str("<meta charset=\"utf-8\">");
+        html.push_str("<meta name=\"robots\" content=\"noindex, nofollow\">");
+        html.push_str("<title>Crawlability Test</title>");
+        html.push_str("</head><body><h1>Title</h1></body></html>");
+
+        let snapshot = snapshot_with_html(&html);
+        let report = SeoAnalyzer::analyze(&snapshot);
+
+        assert!(report.issues.iter().any(|i| {
+            i.category == "best-practices" && i.message.contains("missing an HTML5 doctype")
+        }));
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.category == "meta" && i.message.contains("first 1024 bytes")));
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| { i.category == "seo" && i.message.contains("blocking indexing directive") }));
+    }
+
+    #[test]
+    fn analyze_media_optimization_checks() {
+        let html = r#"
+            <!doctype html>
+            <html><head><meta charset="utf-8"><title>Media Test</title></head>
+            <body>
+                <h1>Media</h1>
+                <img src="1.jpg">
+                <img src="2.jpg">
+                <img src="3.jpg" width="400">
+                <img src="4.jpg" height="300">
+            </body></html>
+        "#;
+
+        let snapshot = snapshot_with_html(html);
+        let report = SeoAnalyzer::analyze(&snapshot);
+
+        assert!(report.issues.iter().any(|i| {
+            i.category == "performance" && i.message.contains("none use loading=lazy")
+        }));
+        assert!(report.issues.iter().any(|i| {
+            i.category == "performance" && i.message.contains("without explicit width/height")
+        }));
+    }
+
+    #[test]
+    fn analyze_contrast_and_meta_refresh_checks() {
+        let html = r#"
+            <!doctype html>
+            <html><head>
+                <meta charset="utf-8">
+                <meta http-equiv="refresh" content="0;url=/target">
+                <title>Contrast Test</title>
+            </head>
+            <body><h1>Title</h1></body></html>
+        "#;
+
+        let mut snapshot = snapshot_with_html(html);
+        snapshot
+            .computed_styles
+            .push(crate::snapshot::ComputedStyle {
+                selector: "p".to_string(),
+                color: Some("rgb(120, 120, 120)".to_string()),
+                background_color: Some("rgb(130, 130, 130)".to_string()),
+                font_size: Some("12px".to_string()),
+                font_weight: Some("400".to_string()),
+            });
+
+        let report = SeoAnalyzer::analyze(&snapshot);
+
+        assert!(report.issues.iter().any(|i| {
+            i.category == "accessibility" && i.message.contains("insufficient text contrast")
+        }));
+        assert!(report.issues.iter().any(|i| {
+            i.category == "best-practices" && i.message.contains("meta refresh redirect")
+        }));
+    }
+
+    #[test]
+    fn analyze_network_header_based_checks() {
+        let html = r#"
+            <!doctype html>
+            <html><head><meta charset="utf-8"><title>Network Test</title></head>
+            <body><h1>Title</h1></body></html>
+        "#;
+
+        let mut snapshot = snapshot_with_html(html);
+        snapshot.url = "https://example.com/".to_string();
+        snapshot.main_resource_network.status_code = Some(404);
+        snapshot
+            .main_resource_network
+            .headers
+            .insert("x-robots-tag".to_string(), "noindex".to_string());
+        snapshot.main_resource_network.headers.insert(
+            "content-type".to_string(),
+            "text/html; charset=utf-8".to_string(),
+        );
+
+        let report = SeoAnalyzer::analyze(&snapshot);
+
+        assert!(report.issues.iter().any(|i| {
+            i.category == "seo" && i.message.contains("unsuccessful status code 404")
+        }));
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.category == "seo" && i.message.contains("X-Robots-Tag blocks indexing")));
+        assert!(report.issues.iter().any(|i| {
+            i.category == "performance" && i.message.contains("missing content-encoding")
+        }));
+        assert!(report.issues.iter().any(|i| {
+            i.category == "best-practices" && i.message.contains("Missing security header")
+        }));
+    }
+
+    #[test]
+    fn analyze_cdp_network_event_based_checks() {
+        let html = r#"
+            <!doctype html>
+            <html><head><meta charset="utf-8"><title>CDP Network Test</title></head>
+            <body><h1>Title</h1></body></html>
+        "#;
+
+        let mut snapshot = snapshot_with_html(html);
+        snapshot.url = "https://example.com/".to_string();
+        snapshot
+            .network_requests
+            .push(crate::snapshot::NetworkRequestRecord {
+                url: "http://cdn.example.com/app.js".to_string(),
+                resource_type: Some("Script".to_string()),
+                status_code: Some(200),
+                encoded_data_length: Some(12_345.0),
+                from_cache: Some(false),
+                was_redirect: Some(false),
+                failed: Some(false),
+                failure_text: None,
+                content_encoding: None,
+                mime_type: Some("application/javascript".to_string()),
+            });
+        snapshot
+            .network_requests
+            .push(crate::snapshot::NetworkRequestRecord {
+                url: "https://example.com/redirected".to_string(),
+                resource_type: Some("Document".to_string()),
+                status_code: Some(301),
+                encoded_data_length: Some(900.0),
+                from_cache: Some(false),
+                was_redirect: Some(true),
+                failed: Some(false),
+                failure_text: None,
+                content_encoding: Some("gzip".to_string()),
+                mime_type: Some("text/html".to_string()),
+            });
+        snapshot
+            .network_requests
+            .push(crate::snapshot::NetworkRequestRecord {
+                url: "https://example.com/fail.css".to_string(),
+                resource_type: Some("Stylesheet".to_string()),
+                status_code: None,
+                encoded_data_length: None,
+                from_cache: Some(false),
+                was_redirect: Some(false),
+                failed: Some(true),
+                failure_text: Some("net::ERR_CONNECTION_RESET".to_string()),
+                content_encoding: None,
+                mime_type: Some("text/css".to_string()),
+            });
+
+        let report = SeoAnalyzer::analyze(&snapshot);
+
+        assert!(report.issues.iter().any(|i| {
+            i.category == "best-practices" && i.message.contains("mixed content request")
+        }));
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.category == "performance" && i.message.contains("redirect")));
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.category == "performance" && i.message.contains("without compression")));
+        assert!(report.issues.iter().any(
+            |i| i.category == "best-practices" && i.message.contains("failed network request")
+        ));
     }
 
     #[test]

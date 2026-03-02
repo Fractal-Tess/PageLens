@@ -116,6 +116,12 @@ pub struct SnapshotOptionsInput {
     pub include_accessibility_tree: bool,
     pub include_performance_timing: bool,
     pub include_computed_styles: bool,
+    #[serde(default = "default_include_network_metadata")]
+    pub include_network_metadata: bool,
+}
+
+fn default_include_network_metadata() -> bool {
+    true
 }
 
 impl Default for SnapshotOptionsInput {
@@ -125,6 +131,7 @@ impl Default for SnapshotOptionsInput {
             include_accessibility_tree: true,
             include_performance_timing: true,
             include_computed_styles: false,
+            include_network_metadata: true,
         }
     }
 }
@@ -136,6 +143,7 @@ impl From<SnapshotOptionsInput> for SnapshotOptions {
             include_accessibility_tree: input.include_accessibility_tree,
             include_performance_timing: input.include_performance_timing,
             include_computed_styles: input.include_computed_styles,
+            include_network_metadata: input.include_network_metadata,
         }
     }
 }

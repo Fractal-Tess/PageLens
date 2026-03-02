@@ -111,6 +111,23 @@ async fn can_capture_performance_timing_from_nextjs() {
 }
 
 #[tokio::test]
+async fn can_capture_network_requests_from_nextjs() {
+    if !common::nextjs_available().await {
+        common::skip_or_fail("Next.js");
+        return;
+    }
+
+    let snapshot = common::snapshot_from_url(&common::nextjs_url())
+        .await
+        .expect("Should capture snapshot");
+
+    assert!(
+        !snapshot.network_requests.is_empty(),
+        "Network requests should be captured"
+    );
+}
+
+#[tokio::test]
 async fn can_capture_computed_styles_from_nextjs() {
     if !common::nextjs_available().await {
         common::skip_or_fail("Next.js");
@@ -161,6 +178,7 @@ async fn snapshot_with_custom_options_from_nextjs() {
         include_accessibility_tree: false,
         include_performance_timing: false,
         include_computed_styles: false,
+        include_network_metadata: false,
     };
     let snapshot = page
         .snapshot(options)

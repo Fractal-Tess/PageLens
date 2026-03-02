@@ -3,7 +3,7 @@
 use crate::prelude::*;
 use crate::browser::Page;
 use scraper::{Html, Selector};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use url::Url;
 
 /// Options for capturing a page snapshot.
@@ -17,6 +17,7 @@ pub struct SnapshotOptions {
     pub include_performance_timing: bool,
     /// Include computed styles for elements.
     pub include_computed_styles: bool,
+    pub include_network_metadata: bool,
 }
 
 impl Default for SnapshotOptions {
@@ -26,8 +27,31 @@ impl Default for SnapshotOptions {
             include_accessibility_tree: true,
             include_performance_timing: true,
             include_computed_styles: false, // Expensive, disabled by default
+            include_network_metadata: true,
         }
     }
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct MainResourceNetwork {
+    pub final_url: Option<String>,
+    pub status_code: Option<u16>,
+    pub headers: HashMap<String, String>,
+    pub fetch_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct NetworkRequestRecord {
+    pub url: String,
+    pub resource_type: Option<String>,
+    pub status_code: Option<u16>,
+    pub encoded_data_length: Option<f64>,
+    pub from_cache: Option<bool>,
+    pub was_redirect: Option<bool>,
+    pub failed: Option<bool>,
+    pub failure_text: Option<String>,
+    pub content_encoding: Option<String>,
+    pub mime_type: Option<String>,
 }
 
 /// A single node in the accessibility tree.
@@ -104,6 +128,8 @@ pub struct Snapshot {
     /// Computed styles for visible elements (if requested).
     pub computed_styles: Vec<ComputedStyle>,
     pub referenced_assets: ReferencedAssets,
+    pub main_resource_network: MainResourceNetwork,
+    pub network_requests: Vec<NetworkRequestRecord>,
     pub capture_issues: Vec<CaptureIssue>,
 }
 
@@ -126,6 +152,8 @@ impl Snapshot {
             },
             computed_styles: Vec::new(),
             referenced_assets: ReferencedAssets::default(),
+            main_resource_network: MainResourceNetwork::default(),
+            network_requests: Vec::new(),
             capture_issues: Vec::new(),
         }
     }
@@ -182,9 +210,90 @@ impl SnapshotExt for Page {
                 }),
             }
         }
+
+        if options.include_network_metadata {
+            match capture_main_resource_network(self).await {
+                Ok(network) => snapshot.main_resource_network = network,
+                Err(err) => snapshot.capture_issues.push(CaptureIssue {
+                    stage: "network_metadata".to_string(),
+                    message: err.to_string(),
+                }),
+            }
+
+            snapshot.network_requests = self.network_requests().await;
+        }
         
         Ok(snapshot)
     }
+}
+
+async fn capture_main_resource_network(page: &Page) -> Result<MainResourceNetwork> {
+    let js = r#"
+        (async function() {
+            try {
+                const response = await fetch(window.location.href, {
+                    method: 'GET',
+                    cache: 'no-store',
+                    credentials: 'same-origin',
+                    redirect: 'follow'
+                });
+
+                const wanted = [
+                    'cache-control',
+                    'content-encoding',
+                    'content-type',
+                    'content-security-policy',
+                    'strict-transport-security',
+                    'x-content-type-options',
+                    'x-frame-options',
+                    'referrer-policy',
+                    'permissions-policy',
+                    'x-robots-tag',
+                    'cross-origin-opener-policy',
+                    'cross-origin-embedder-policy',
+                    'cross-origin-resource-policy'
+                ];
+
+                const headers = {};
+                for (const name of wanted) {
+                    const value = response.headers.get(name);
+                    if (value !== null) {
+                        headers[name] = value;
+                    }
+                }
+
+                return JSON.stringify({
+                    final_url: response.url || window.location.href,
+                    status_code: response.status,
+                    headers,
+                    fetch_error: null,
+                });
+            } catch (err) {
+                return JSON.stringify({
+                    final_url: window.location.href,
+                    status_code: null,
+                    headers: {},
+                    fetch_error: String(err),
+                });
+            }
+        })()
+    "#;
+
+    let cdp_page = page
+        .cdp_page()
+        .ok_or_else(|| Error::ExtractionFailed("CDP page unavailable".to_string()))?;
+
+    let result = cdp_page
+        .evaluate(js)
+        .await
+        .map_err(|e| Error::ExtractionFailed(format!("Network metadata evaluation failed: {e}")))?;
+
+    let json_str = result
+        .into_value::<String>()
+        .map_err(|e| Error::ExtractionFailed(format!("Network metadata decode failed: {e}")))?;
+
+    serde_json::from_str::<MainResourceNetwork>(&json_str)
+        .map_err(|e| Error::ExtractionFailed(format!("Network metadata JSON parse failed: {e}")))
 }
 
 fn extract_referenced_assets(html: &str, page_url: &str) -> ReferencedAssets {
