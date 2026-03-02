@@ -10,7 +10,7 @@ A website analysis tool built with Tauri, Svelte, and Rust.
 
 PageLens is a monorepo containing:
 
-- **Web App** (`@pagelens/web`): Tauri + Svelte desktop application
+- **Desktop App** (`@pagelens/dowry`): Tauri + Svelte desktop application
 - **Core Engine** (`pagelens-core`): Rust library for website analysis
 - **CLI** (`pagelens-cli`): Command-line interface
 - **Test Apps** (`@pagelens/test-apps-*`): Next.js and SvelteKit test sites
@@ -44,7 +44,7 @@ bun turbo run build --filter="./test-apps/*"
 
 ```bash
 # Run the main Tauri application
-bun tauri dev
+bun run dev
 ```
 
 ## Monorepo Structure
@@ -53,15 +53,14 @@ This is a monorepo using **Bun** and **Turbo**.
 
 ```
 pagelens/
-├── apps/                       # Future applications
+├── apps/
+│   └── dowry/                  # Tauri wrapper + SPA source
 ├── crates/
 │   ├── pagelens-core/          # Rust analysis engine
 │   └── pagelens-cli/           # Rust CLI
 ├── test-apps/
 │   ├── nextjs/                 # @pagelens/test-apps-nextjs
 │   └── svelte-kit/             # @pagelens/test-apps-svelte
-├── src/                        # Main Svelte app source
-├── src-tauri/                  # Tauri Rust source
 ├── package.json                # Root workspace
 ├── bun.lockb                   # Lockfile
 └── turbo.json                  # Turbo config
@@ -96,13 +95,13 @@ cargo test -p pagelens-core -- --test-threads=1
 ```bash
 bun install                      # Install dependencies
 bun turbo run build             # Build all packages
-bun run prod                    # Start test servers
+bun run start-apps              # Start test servers
 bun run test:integration        # Run integration tests
 ```
 
 ## Requirements
 
-- (optional) On Linux you need to have installed the [mold](https://github.com/rui314/mold) linker. If you prefer not to do that, go ahead and remove the rust flags in the `/src-tauri/.cargo/config.toml` file.
+- (optional) On Linux you need to have installed the [mold](https://github.com/rui314/mold) linker. If you prefer not to do that, go ahead and remove the rust flags in `/apps/dowry/src-tauri/.cargo/config.toml`.
 
 ## License
 

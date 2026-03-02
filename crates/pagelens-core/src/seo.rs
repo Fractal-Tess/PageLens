@@ -800,6 +800,69 @@ impl SeoAnalyzer {
                     );
                 }
             }
+
+            if let Some(hsts) = network.headers.get("strict-transport-security") {
+                let hsts_lower = hsts.to_ascii_lowercase();
+                if let Some(max_age) = Self::extract_hsts_max_age(&hsts_lower) {
+                    if max_age < 15_552_000 {
+                        report.add_issue(
+                            Severity::Warning,
+                            "best-practices",
+                            "HSTS max-age is too low; prefer at least 15552000 seconds",
+                        );
+                    }
+                }
+                if !hsts_lower.contains("includesubdomains") {
+                    report.add_issue(
+                        Severity::Info,
+                        "best-practices",
+                        "HSTS header is missing includeSubDomains",
+                    );
+                }
+            }
+
+            if let Some(xcto) = network.headers.get("x-content-type-options") {
+                if !xcto.eq_ignore_ascii_case("nosniff") {
+                    report.add_issue(
+                        Severity::Warning,
+                        "best-practices",
+                        "X-Content-Type-Options should be set to nosniff",
+                    );
+                }
+            }
+
+            if let Some(xfo) = network.headers.get("x-frame-options") {
+                let allowed =
+                    xfo.eq_ignore_ascii_case("deny") || xfo.eq_ignore_ascii_case("sameorigin");
+                if !allowed {
+                    report.add_issue(
+                        Severity::Warning,
+                        "best-practices",
+                        "X-Frame-Options should be DENY or SAMEORIGIN",
+                    );
+                }
+            }
+
+            if let Some(referrer_policy) = network.headers.get("referrer-policy") {
+                if referrer_policy.eq_ignore_ascii_case("unsafe-url") {
+                    report.add_issue(
+                        Severity::Warning,
+                        "best-practices",
+                        "Referrer-Policy is unsafe-url; prefer stricter policy",
+                    );
+                }
+            }
+
+            if let Some(csp) = network.headers.get("content-security-policy") {
+                let csp_lower = csp.to_ascii_lowercase();
+                if csp_lower.contains("'unsafe-inline'") || csp_lower.contains("'unsafe-eval'") {
+                    report.add_issue(
+                        Severity::Warning,
+                        "best-practices",
+                        "CSP contains unsafe-inline/unsafe-eval directives",
+                    );
+                }
+            }
         }
     }
 
@@ -1608,6 +1671,20 @@ impl SeoAnalyzer {
             .unwrap_or(false)
     }
 
+    fn extract_hsts_max_age(header_value: &str) -> Option<u64> {
+        header_value
+            .split(';')
+            .map(|part| part.trim())
+            .find_map(|part| {
+                let (key, value) = part.split_once('=')?;
+                if key.trim().eq_ignore_ascii_case("max-age") {
+                    value.trim().parse::<u64>().ok()
+                } else {
+                    None
+                }
+            })
+    }
+
     fn should_check_secure_transport(page_url: &str) -> bool {
         let Ok(url) = Url::parse(page_url) else {
             return false;
@@ -2108,6 +2185,61 @@ mod tests {
         assert!(report.issues.iter().any(|i| {
             i.category == "best-practices" && i.message.contains("Missing security header")
         }));
+    }
+
+    #[test]
+    fn analyze_security_header_quality_checks() {
+        let html = r#"
+            <!doctype html>
+            <html><head><meta charset="utf-8"><title>Header Quality Test</title></head>
+            <body><h1>Title</h1></body></html>
+        "#;
+
+        let mut snapshot = snapshot_with_html(html);
+        snapshot.url = "https://example.com/".to_string();
+        snapshot.main_resource_network.status_code = Some(200);
+        snapshot.main_resource_network.headers.insert(
+            "strict-transport-security".to_string(),
+            "max-age=300".to_string(),
+        );
+        snapshot
+            .main_resource_network
+            .headers
+            .insert("x-content-type-options".to_string(), "invalid".to_string());
+        snapshot
+            .main_resource_network
+            .headers
+            .insert("x-frame-options".to_string(), "ALLOWALL".to_string());
+        snapshot
+            .main_resource_network
+            .headers
+            .insert("referrer-policy".to_string(), "unsafe-url".to_string());
+        snapshot.main_resource_network.headers.insert(
+            "content-security-policy".to_string(),
+            "script-src 'self' 'unsafe-inline'".to_string(),
+        );
+
+        let report = SeoAnalyzer::analyze(&snapshot);
+
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.category == "best-practices" && i.message.contains("HSTS max-age")));
+        assert!(report.issues.iter().any(
+            |i| i.category == "best-practices" && i.message.contains("X-Content-Type-Options")
+        ));
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.category == "best-practices" && i.message.contains("X-Frame-Options")));
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.category == "best-practices" && i.message.contains("Referrer-Policy")));
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.category == "best-practices" && i.message.contains("unsafe-inline")));
     }
 
     #[test]

@@ -11,6 +11,6 @@ updates:
       interval: 'monthly'
 
   - package-ecosystem: 'cargo'
-    directory: '/src-tauri/'
+    directory: '/apps/dowry/src-tauri/'
     schedule:
       interval: 'monthly'

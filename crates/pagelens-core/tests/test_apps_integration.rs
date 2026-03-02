@@ -1,4 +1,4 @@
-//! Integration tests for test-apps (Next.js and SvelteKit sites)
+//! Integration tests for apps (Next.js and SvelteKit sites)
 //!
 //! These tests verify page-specific SEO characteristics against the actual
 //! built test applications. Basic SEO checks (meta tags, OG, Twitter, etc.)
@@ -10,7 +10,7 @@
 //!   - Cross-framework comparisons
 //!
 //! Prerequisites:
-//!   Run `bun run start-test-apps` from the project root to start both servers.
+//!   Run `bun run start-apps` from the project root to start both servers.
 
 mod common;
 

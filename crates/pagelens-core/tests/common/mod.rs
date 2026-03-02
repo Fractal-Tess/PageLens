@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-//! Common test utilities for integration tests with test-apps
+//! Common test utilities for integration tests with apps
 //!
 //! This module provides helper functions for connecting to the running
 //! test applications (Next.js and SvelteKit).
@@ -7,7 +7,7 @@
 //! Prerequisites:
 //!   - Next.js test app should be running on port 44791 (or $NEXTJS_PORT)
 //!   - SvelteKit test app should be running on port 44792 (or $SVELTE_PORT)
-//!   - Run `bun run start-test-apps` from the project root to start both
+//!   - Run `bun run start-apps` from the project root to start both
 
 use pagelens_core::browser::Browser;
 use pagelens_core::crawl::{CrawlOptions, CrawlResult, Crawler};
@@ -210,7 +210,7 @@ pub async fn svelte_available() -> bool {
 
 /// Skip message when test servers are not available
 pub const SKIP_MESSAGE: &str = "Test servers not available. \
-    Run 'bun run start-test-apps' from the project root first. \
+    Run 'bun run start-apps' from the project root first. \
     Expected: Next.js on http://localhost:44791, SvelteKit on http://localhost:44792";
 
 /// Get a list of all page paths available in the Next.js test app
