@@ -141,6 +141,13 @@ impl<'a> Crawler<'a> {
     /// 3. Recursively crawl linked pages up to max_pages/max_depth
     /// 4. Generate aggregate reports
     pub async fn crawl(&self, seed_url: &str) -> Result<CrawlResult> {
+        self.crawl_with_callback(seed_url, |_page, _stats| {}).await
+    }
+
+    pub async fn crawl_with_callback<F>(&self, seed_url: &str, mut on_page: F) -> Result<CrawlResult>
+    where
+        F: FnMut(&CrawledPage, &CrawlStats),
+    {
         let start_time = Instant::now();
         
         // Validate URL
@@ -230,6 +237,9 @@ impl<'a> Crawler<'a> {
                 }
 
                 result.pages.push(crawled_page);
+                if let Some(last_page) = result.pages.last() {
+                    on_page(last_page, &result.stats);
+                }
             }
 
             if self.options.delay_ms > 0 {
