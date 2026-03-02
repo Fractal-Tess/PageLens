@@ -208,26 +208,19 @@ impl Browser {
         let collected_network_requests: Arc<tokio::sync::Mutex<Vec<crate::snapshot::NetworkRequestRecord>>> =
             Arc::new(tokio::sync::Mutex::new(Vec::new()));
 
-        let cdp_page = if headers.is_empty() {
-            browser.new_page(url).await
-        } else {
-            let page = browser
-                .new_page("about:blank")
-                .await
-                .map_err(|e| Error::NavigationFailed(e.to_string()))?;
+        let cdp_page = browser
+            .new_page("about:blank")
+            .await
+            .map_err(|e| Error::NavigationFailed(e.to_string()))?;
+
+        if !headers.is_empty() {
             let headers = serde_json::to_value(headers)
                 .map_err(|e| Error::NavigationFailed(format!("Invalid headers: {e}")))?;
-            page
+            cdp_page
                 .set_extra_headers(SetExtraHttpHeadersParams::new(Headers::new(headers)))
                 .await
                 .map_err(|e| Error::NavigationFailed(format!("Failed setting headers: {e}")))?;
-            page
-                .goto(url)
-                .await
-                .map_err(|e| Error::NavigationFailed(e.to_string()))?;
-            Ok(page)
         }
-        .map_err(|e| Error::NavigationFailed(e.to_string()))?;
 
         if !url.starts_with("data:") {
             let _ = cdp_page.execute(EnableParams::default()).await;
@@ -259,6 +252,10 @@ impl Browser {
                                 record.url = req.request.url.clone();
                                 record.resource_type = req.r#type.as_ref().map(|t| format!("{:?}", t));
                                 record.was_redirect = Some(req.redirect_response.is_some());
+                                if let Some(redirect_response) = &req.redirect_response {
+                                    record.redirect_from_url = Some(redirect_response.url.clone());
+                                    record.redirect_status_code = Some(redirect_response.status as u16);
+                                }
                                 record.request_start_time_s = Some(*req.timestamp.inner());
                                 by_request.insert(key, record);
 
@@ -350,6 +347,11 @@ impl Browser {
                 });
             }
         }
+
+        cdp_page
+            .goto(url)
+            .await
+            .map_err(|e| Error::NavigationFailed(e.to_string()))?;
 
         // Wait for navigation to complete
         if !url.starts_with("data:") {
