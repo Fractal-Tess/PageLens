@@ -52,6 +52,10 @@ pub struct NetworkRequestRecord {
     pub failure_text: Option<String>,
     pub content_encoding: Option<String>,
     pub mime_type: Option<String>,
+    pub request_start_time_s: Option<f64>,
+    pub response_start_time_s: Option<f64>,
+    pub end_time_s: Option<f64>,
+    pub duration_ms: Option<f64>,
 }
 
 /// A single node in the accessibility tree.
@@ -82,6 +86,9 @@ pub struct PerformanceTiming {
     pub response_start: Option<u64>,
     pub first_paint: Option<u64>,
     pub first_contentful_paint: Option<u64>,
+    pub largest_contentful_paint: Option<u64>,
+    pub cumulative_layout_shift: Option<f64>,
+    pub interaction_to_next_paint: Option<u64>,
 }
 
 /// Computed style information for an element.
@@ -149,6 +156,9 @@ impl Snapshot {
                 response_start: None,
                 first_paint: None,
                 first_contentful_paint: None,
+                largest_contentful_paint: None,
+                cumulative_layout_shift: None,
+                interaction_to_next_paint: None,
             },
             computed_styles: Vec::new(),
             referenced_assets: ReferencedAssets::default(),
@@ -507,6 +517,19 @@ async fn capture_performance_timing(page: &Page) -> Result<PerformanceTiming> {
             const paintEntries = performance.getEntriesByType('paint') || [];
             const firstPaint = paintEntries.find(e => e.name === 'first-paint');
             const firstContentfulPaint = paintEntries.find(e => e.name === 'first-contentful-paint');
+            const lcpEntries = performance.getEntriesByType('largest-contentful-paint') || [];
+            const lcp = lcpEntries.length ? lcpEntries[lcpEntries.length - 1] : null;
+            const clsEntries = performance.getEntriesByType('layout-shift') || [];
+            const cls = clsEntries.reduce((sum, entry) => {
+                if (entry && entry.hadRecentInput) {
+                    return sum;
+                }
+                return sum + (entry && typeof entry.value === 'number' ? entry.value : 0);
+            }, 0);
+            const inpEntries = performance.getEntriesByType('event') || [];
+            const inpCandidate = inpEntries
+                .filter(e => e && e.interactionId > 0 && typeof e.duration === 'number')
+                .sort((a, b) => b.duration - a.duration)[0];
             const entry = performance.getEntriesByType('navigation')[0];
             if (entry) {
                 return JSON.stringify({
@@ -516,7 +539,10 @@ async fn capture_performance_timing(page: &Page) -> Result<PerformanceTiming> {
                     load_complete: entry.loadEventEnd ? Math.round(origin + entry.loadEventEnd) : null,
                     response_start: entry.responseStart ? Math.round(origin + entry.responseStart) : null,
                     first_paint: firstPaint ? Math.round(origin + firstPaint.startTime) : null,
-                    first_contentful_paint: firstContentfulPaint ? Math.round(origin + firstContentfulPaint.startTime) : null
+                    first_contentful_paint: firstContentfulPaint ? Math.round(origin + firstContentfulPaint.startTime) : null,
+                    largest_contentful_paint: lcp ? Math.round(origin + lcp.startTime) : null,
+                    cumulative_layout_shift: cls > 0 ? cls : null,
+                    interaction_to_next_paint: inpCandidate ? Math.round(inpCandidate.duration) : null
                 });
             }
 
@@ -529,7 +555,10 @@ async fn capture_performance_timing(page: &Page) -> Result<PerformanceTiming> {
                 load_complete: timing.loadEventEnd || null,
                 response_start: timing.responseStart || null,
                 first_paint: firstPaint ? Math.round(origin + firstPaint.startTime) : null,
-                first_contentful_paint: firstContentfulPaint ? Math.round(origin + firstContentfulPaint.startTime) : null
+                first_contentful_paint: firstContentfulPaint ? Math.round(origin + firstContentfulPaint.startTime) : null,
+                largest_contentful_paint: lcp ? Math.round(origin + lcp.startTime) : null,
+                cumulative_layout_shift: cls > 0 ? cls : null,
+                interaction_to_next_paint: inpCandidate ? Math.round(inpCandidate.duration) : null
             });
         })()
     "#;
@@ -558,6 +587,9 @@ async fn capture_performance_timing(page: &Page) -> Result<PerformanceTiming> {
         response_start: timing["response_start"].as_u64(),
         first_paint: timing["first_paint"].as_u64(),
         first_contentful_paint: timing["first_contentful_paint"].as_u64(),
+        largest_contentful_paint: timing["largest_contentful_paint"].as_u64(),
+        cumulative_layout_shift: timing["cumulative_layout_shift"].as_f64(),
+        interaction_to_next_paint: timing["interaction_to_next_paint"].as_u64(),
     })
 }
 

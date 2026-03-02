@@ -2,8 +2,8 @@
 
 use crate::prelude::*;
 use chromiumoxide::cdp::browser_protocol::network::{
-    EnableParams, EventLoadingFailed, EventRequestWillBeSent, EventResponseReceived, Headers,
-    SetExtraHttpHeadersParams,
+    EnableParams, EventLoadingFailed, EventLoadingFinished, EventRequestWillBeSent,
+    EventResponseReceived, Headers, SetExtraHttpHeadersParams,
 };
 use chromiumoxide::{Browser as ChromeBrowser, BrowserConfig, Page as ChromePage};
 use std::collections::HashMap;
@@ -224,9 +224,15 @@ impl Browser {
         if !url.starts_with("data:") {
             let _ = cdp_page.execute(EnableParams::default()).await;
 
-            if let (Ok(mut request_stream), Ok(mut response_stream), Ok(mut failed_stream)) = (
+            if let (
+                Ok(mut request_stream),
+                Ok(mut response_stream),
+                Ok(mut finished_stream),
+                Ok(mut failed_stream),
+            ) = (
                 cdp_page.event_listener::<EventRequestWillBeSent>().await,
                 cdp_page.event_listener::<EventResponseReceived>().await,
+                cdp_page.event_listener::<EventLoadingFinished>().await,
                 cdp_page.event_listener::<EventLoadingFailed>().await,
             ) {
                 let collected = Arc::clone(&collected_network_requests);
@@ -245,16 +251,24 @@ impl Browser {
                                 record.url = req.request.url.clone();
                                 record.resource_type = req.r#type.as_ref().map(|t| format!("{:?}", t));
                                 record.was_redirect = Some(req.redirect_response.is_some());
+                                record.request_start_time_s = Some(*req.timestamp.inner());
                                 by_request.insert(key, record);
 
                                 let mut out = collected.lock().await;
-                                *out = by_request.values().cloned().collect();
+                                let mut values: Vec<_> = by_request.values().cloned().collect();
+                                values.sort_by(|a, b| {
+                                    a.request_start_time_s
+                                        .partial_cmp(&b.request_start_time_s)
+                                        .unwrap_or(std::cmp::Ordering::Equal)
+                                });
+                                *out = values;
                             }
                             resp = response_stream.next() => {
                                 let Some(resp) = resp else { break; };
                                 let key = format!("{:?}", resp.request_id);
                                 let mut record = by_request.remove(&key).unwrap_or_default();
                                 record.url = resp.response.url.clone();
+                                record.response_start_time_s = Some(*resp.timestamp.inner());
                                 record.status_code = Some(resp.response.status as u16);
                                 record.encoded_data_length = Some(resp.response.encoded_data_length);
                                 record.from_cache = Some(
@@ -276,24 +290,75 @@ impl Browser {
                                 by_request.insert(key, record);
 
                                 let mut out = collected.lock().await;
-                                *out = by_request.values().cloned().collect();
+                                let mut values: Vec<_> = by_request.values().cloned().collect();
+                                values.sort_by(|a, b| {
+                                    a.request_start_time_s
+                                        .partial_cmp(&b.request_start_time_s)
+                                        .unwrap_or(std::cmp::Ordering::Equal)
+                                });
+                                *out = values;
+                            }
+                            finished = finished_stream.next() => {
+                                let Some(finished) = finished else { break; };
+                                let key = format!("{:?}", finished.request_id);
+                                let mut record = by_request.remove(&key).unwrap_or_default();
+                                record.end_time_s = Some(*finished.timestamp.inner());
+                                record.encoded_data_length = Some(finished.encoded_data_length);
+                                record.failed = Some(false);
+
+                                if let (Some(start), Some(end)) = (record.request_start_time_s, record.end_time_s) {
+                                    if end >= start {
+                                        record.duration_ms = Some((end - start) * 1000.0);
+                                    }
+                                }
+
+                                by_request.insert(key, record);
+
+                                let mut out = collected.lock().await;
+                                let mut values: Vec<_> = by_request.values().cloned().collect();
+                                values.sort_by(|a, b| {
+                                    a.request_start_time_s
+                                        .partial_cmp(&b.request_start_time_s)
+                                        .unwrap_or(std::cmp::Ordering::Equal)
+                                });
+                                *out = values;
                             }
                             failed = failed_stream.next() => {
                                 let Some(failed) = failed else { break; };
                                 let key = format!("{:?}", failed.request_id);
                                 let mut record = by_request.remove(&key).unwrap_or_default();
+                                record.end_time_s = Some(*failed.timestamp.inner());
                                 record.failed = Some(true);
                                 record.failure_text = Some(failed.error_text.clone());
+
+                                if let (Some(start), Some(end)) = (record.request_start_time_s, record.end_time_s) {
+                                    if end >= start {
+                                        record.duration_ms = Some((end - start) * 1000.0);
+                                    }
+                                }
+
                                 by_request.insert(key, record);
 
                                 let mut out = collected.lock().await;
-                                *out = by_request.values().cloned().collect();
+                                let mut values: Vec<_> = by_request.values().cloned().collect();
+                                values.sort_by(|a, b| {
+                                    a.request_start_time_s
+                                        .partial_cmp(&b.request_start_time_s)
+                                        .unwrap_or(std::cmp::Ordering::Equal)
+                                });
+                                *out = values;
                             }
                         }
                     }
 
                     let mut out = collected.lock().await;
-                    out.extend(by_request.into_values());
+                    let mut values: Vec<_> = by_request.into_values().collect();
+                    values.sort_by(|a, b| {
+                        a.request_start_time_s
+                            .partial_cmp(&b.request_start_time_s)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    *out = values;
                 });
             }
         }
