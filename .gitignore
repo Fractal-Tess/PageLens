@@ -27,3 +27,6 @@ test-apps/.test-servers.pid
 
 # Development artifacts
 .sisyphus/
+
+# Lighthouse reports
+lighthouse/

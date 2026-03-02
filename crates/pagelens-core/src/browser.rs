@@ -1,10 +1,14 @@
 //! Browser management — Chromium download, launch, and lifecycle.
 
 use crate::prelude::*;
-use chromiumoxide::cdp::browser_protocol::network::{Headers, SetExtraHttpHeadersParams};
+use chromiumoxide::cdp::browser_protocol::network::{
+    EnableParams, EventLoadingFailed, EventRequestWillBeSent, EventResponseReceived, Headers,
+    SetExtraHttpHeadersParams,
+};
 use chromiumoxide::{Browser as ChromeBrowser, BrowserConfig, Page as ChromePage};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::task::JoinHandle;
 
 /// Environment variable for Playwright Chromium path
@@ -193,6 +197,8 @@ impl Browser {
         }
 
         let browser = self.get_browser()?;
+        let collected_network_requests: Arc<tokio::sync::Mutex<Vec<crate::snapshot::NetworkRequestRecord>>> =
+            Arc::new(tokio::sync::Mutex::new(Vec::new()));
 
         let cdp_page = if headers.is_empty() {
             browser.new_page(url).await
@@ -214,6 +220,83 @@ impl Browser {
             Ok(page)
         }
         .map_err(|e| Error::NavigationFailed(e.to_string()))?;
+
+        if !url.starts_with("data:") {
+            let _ = cdp_page.execute(EnableParams::default()).await;
+
+            if let (Ok(mut request_stream), Ok(mut response_stream), Ok(mut failed_stream)) = (
+                cdp_page.event_listener::<EventRequestWillBeSent>().await,
+                cdp_page.event_listener::<EventResponseReceived>().await,
+                cdp_page.event_listener::<EventLoadingFailed>().await,
+            ) {
+                let collected = Arc::clone(&collected_network_requests);
+                tokio::spawn(async move {
+                    use futures::StreamExt;
+
+                    let mut by_request: HashMap<String, crate::snapshot::NetworkRequestRecord> =
+                        HashMap::new();
+
+                    loop {
+                        tokio::select! {
+                            req = request_stream.next() => {
+                                let Some(req) = req else { break; };
+                                let key = format!("{:?}", req.request_id);
+                                let mut record = by_request.remove(&key).unwrap_or_default();
+                                record.url = req.request.url.clone();
+                                record.resource_type = req.r#type.as_ref().map(|t| format!("{:?}", t));
+                                record.was_redirect = Some(req.redirect_response.is_some());
+                                by_request.insert(key, record);
+
+                                let mut out = collected.lock().await;
+                                *out = by_request.values().cloned().collect();
+                            }
+                            resp = response_stream.next() => {
+                                let Some(resp) = resp else { break; };
+                                let key = format!("{:?}", resp.request_id);
+                                let mut record = by_request.remove(&key).unwrap_or_default();
+                                record.url = resp.response.url.clone();
+                                record.status_code = Some(resp.response.status as u16);
+                                record.encoded_data_length = Some(resp.response.encoded_data_length);
+                                record.from_cache = Some(
+                                    resp.response.from_disk_cache.unwrap_or(false)
+                                        || resp.response.from_prefetch_cache.unwrap_or(false),
+                                );
+                                record.mime_type = Some(resp.response.mime_type.clone());
+                                record.content_encoding = resp
+                                    .response
+                                    .headers
+                                    .0
+                                    .get("content-encoding")
+                                    .map(|value| {
+                                        value
+                                            .as_str()
+                                            .map(std::string::ToString::to_string)
+                                            .unwrap_or_else(|| value.to_string())
+                                    });
+                                by_request.insert(key, record);
+
+                                let mut out = collected.lock().await;
+                                *out = by_request.values().cloned().collect();
+                            }
+                            failed = failed_stream.next() => {
+                                let Some(failed) = failed else { break; };
+                                let key = format!("{:?}", failed.request_id);
+                                let mut record = by_request.remove(&key).unwrap_or_default();
+                                record.failed = Some(true);
+                                record.failure_text = Some(failed.error_text.clone());
+                                by_request.insert(key, record);
+
+                                let mut out = collected.lock().await;
+                                *out = by_request.values().cloned().collect();
+                            }
+                        }
+                    }
+
+                    let mut out = collected.lock().await;
+                    out.extend(by_request.into_values());
+                });
+            }
+        }
 
         // Wait for navigation to complete
         if !url.starts_with("data:") {
@@ -244,6 +327,7 @@ impl Browser {
         Ok(Page {
             cdp_page: Some(cdp_page),
             url: url.to_string(),
+            network_requests: collected_network_requests,
         })
     }
 
@@ -288,12 +372,17 @@ pub struct Page {
     pub(crate) cdp_page: Option<ChromePage>,
     /// The URL of the page
     url: String,
+    pub(crate) network_requests: Arc<tokio::sync::Mutex<Vec<crate::snapshot::NetworkRequestRecord>>>,
 }
 
 impl Page {
     /// Get the URL of this page.
     pub fn url(&self) -> &str {
         &self.url
+    }
+
+    pub async fn network_requests(&self) -> Vec<crate::snapshot::NetworkRequestRecord> {
+        self.network_requests.lock().await.clone()
     }
 
     /// Get the full HTML content of the page.
