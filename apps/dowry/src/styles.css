@@ -1,0 +1,2 @@
+@import '@pagelens/ui/shadcn/css';
+@source './**/*.{html,js,svelte,ts}';
