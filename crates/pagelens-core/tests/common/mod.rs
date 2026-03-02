@@ -225,6 +225,7 @@ pub fn nextjs_page_paths() -> Vec<&'static str> {
         "/legacy",
         "/services",
         "/slow-page",
+        "/redirect-chain/final",
     ]
 }
 
@@ -239,5 +240,6 @@ pub fn svelte_page_paths() -> Vec<&'static str> {
         "/products",
         "/seo-test",
         "/slow-page",
+        "/redirect-chain/final",
     ]
 }

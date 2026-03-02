@@ -213,3 +213,37 @@ async fn svelte_seo_test_page_has_issues() {
         );
     }
 }
+
+#[tokio::test]
+async fn nextjs_redirect_chain_route_reports_redirect_issue() {
+    if !common::nextjs_available().await {
+        common::skip_or_fail("Next.js");
+        return;
+    }
+
+    let url = format!("{}/redirect-chain/start", common::nextjs_url());
+    let report = common::seo_report_from_url(&url)
+        .await
+        .expect("Should get SEO report");
+
+    assert!(report.issues.iter().any(|issue| {
+        issue.category == "performance" && issue.message.contains("Redirect chain")
+    }));
+}
+
+#[tokio::test]
+async fn svelte_redirect_chain_route_reports_redirect_issue() {
+    if !common::svelte_available().await {
+        common::skip_or_fail("SvelteKit");
+        return;
+    }
+
+    let url = format!("{}/redirect-chain/start", common::svelte_url());
+    let report = common::seo_report_from_url(&url)
+        .await
+        .expect("Should get SEO report");
+
+    assert!(report.issues.iter().any(|issue| {
+        issue.category == "performance" && issue.message.contains("Redirect chain")
+    }));
+}
