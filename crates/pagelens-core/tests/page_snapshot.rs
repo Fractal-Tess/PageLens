@@ -125,6 +125,23 @@ async fn can_capture_network_requests_from_nextjs() {
         !snapshot.network_requests.is_empty(),
         "Network requests should be captured"
     );
+
+    let mut previous = f64::MIN;
+    for request in &snapshot.network_requests {
+        if let Some(start) = request.request_start_time_s {
+            assert!(
+                start >= previous,
+                "Network requests should be sorted by start time"
+            );
+            previous = start;
+        }
+    }
+
+    let has_duration = snapshot
+        .network_requests
+        .iter()
+        .any(|request| request.duration_ms.unwrap_or(0.0) > 0.0);
+    assert!(has_duration, "At least one network request should have duration");
 }
 
 #[tokio::test]

@@ -59,6 +59,8 @@ pub struct ScoreConfig {
     pub description_bonus: f64,
     pub canonical_bonus: f64,
     pub structured_data_bonus: f64,
+    pub issue_weight: f64,
+    pub performance_weight: f64,
 }
 
 impl Default for ScoreConfig {
@@ -71,6 +73,8 @@ impl Default for ScoreConfig {
             description_bonus: 5.0,
             canonical_bonus: 2.0,
             structured_data_bonus: 5.0,
+            issue_weight: 0.65,
+            performance_weight: 0.35,
         }
     }
 }
@@ -283,7 +287,7 @@ impl SeoAnalyzer {
         Self::analyze_structured_data(&mut report, &document);
 
         // Calculate final score
-        report.score = Self::calculate_score(&report, score_config);
+        report.score = Self::calculate_score(&report, snapshot, score_config);
 
         report
     }
@@ -804,6 +808,31 @@ impl SeoAnalyzer {
             return;
         }
 
+        let min_start = snapshot
+            .network_requests
+            .iter()
+            .filter_map(|request| request.request_start_time_s)
+            .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let max_end = snapshot
+            .network_requests
+            .iter()
+            .filter_map(|request| request.end_time_s)
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+        if let (Some(start), Some(end)) = (min_start, max_end) {
+            if end >= start {
+                report.add_issue(
+                    Severity::Info,
+                    "performance",
+                    &format!(
+                        "Network waterfall window spans {}ms across {} request(s)",
+                        ((end - start) * 1000.0).round() as u64,
+                        snapshot.network_requests.len()
+                    ),
+                );
+            }
+        }
+
         if snapshot.url.starts_with("https://")
             && snapshot
                 .network_requests
@@ -878,6 +907,58 @@ impl SeoAnalyzer {
                 "best-practices",
                 &format!("Detected {} failed network request(s)", failed_count),
             );
+        }
+
+        let is_critical_type = |resource_type: Option<&str>| {
+            matches!(
+                resource_type,
+                Some("Document") | Some("Script") | Some("Stylesheet") | Some("Font")
+            )
+        };
+
+        let critical_candidate = snapshot
+            .network_requests
+            .iter()
+            .filter(|request| {
+                is_critical_type(request.resource_type.as_deref())
+                    && !request.from_cache.unwrap_or(false)
+                    && !request.failed.unwrap_or(false)
+            })
+            .max_by(|a, b| {
+                let a_ms = a
+                    .duration_ms
+                    .or_else(|| match (a.request_start_time_s, a.end_time_s) {
+                        (Some(start), Some(end)) if end >= start => Some((end - start) * 1000.0),
+                        _ => None,
+                    });
+                let b_ms = b
+                    .duration_ms
+                    .or_else(|| match (b.request_start_time_s, b.end_time_s) {
+                        (Some(start), Some(end)) if end >= start => Some((end - start) * 1000.0),
+                        _ => None,
+                    });
+                a_ms.partial_cmp(&b_ms).unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+        if let Some(candidate) = critical_candidate {
+            let duration_ms = candidate.duration_ms.or_else(|| {
+                match (candidate.request_start_time_s, candidate.end_time_s) {
+                    (Some(start), Some(end)) if end >= start => Some((end - start) * 1000.0),
+                    _ => None,
+                }
+            });
+
+            if let Some(duration_ms) = duration_ms {
+                report.add_issue(
+                    Severity::Info,
+                    "performance",
+                    &format!(
+                        "Critical path candidate: {} took {}ms",
+                        candidate.url,
+                        duration_ms.round() as u64
+                    ),
+                );
+            }
         }
     }
 
@@ -1129,8 +1210,8 @@ impl SeoAnalyzer {
     }
 
     /// Calculate overall SEO score.
-    fn calculate_score(report: &SeoReport, score_config: &ScoreConfig) -> f64 {
-        let mut score = 100.0;
+    fn calculate_score(report: &SeoReport, snapshot: &Snapshot, score_config: &ScoreConfig) -> f64 {
+        let mut issue_score = 100.0;
 
         // Deduct points for errors
         let error_count = report
@@ -1138,7 +1219,7 @@ impl SeoAnalyzer {
             .iter()
             .filter(|i| i.severity == Severity::Error)
             .count();
-        score -= error_count as f64 * score_config.error_penalty;
+        issue_score -= error_count as f64 * score_config.error_penalty;
 
         // Deduct points for warnings
         let warning_count = report
@@ -1146,7 +1227,7 @@ impl SeoAnalyzer {
             .iter()
             .filter(|i| i.severity == Severity::Warning)
             .count();
-        score -= warning_count as f64 * score_config.warning_penalty;
+        issue_score -= warning_count as f64 * score_config.warning_penalty;
 
         // Deduct points for info (minor)
         let info_count = report
@@ -1154,23 +1235,128 @@ impl SeoAnalyzer {
             .iter()
             .filter(|i| i.severity == Severity::Info)
             .count();
-        score -= info_count as f64 * score_config.info_penalty;
+        issue_score -= info_count as f64 * score_config.info_penalty;
 
         // Bonus for good practices
         if report.meta.title.is_some() {
-            score += score_config.title_bonus;
+            issue_score += score_config.title_bonus;
         }
         if report.meta.description.is_some() {
-            score += score_config.description_bonus;
+            issue_score += score_config.description_bonus;
         }
         if report.canonical_url.is_some() {
-            score += score_config.canonical_bonus;
+            issue_score += score_config.canonical_bonus;
         }
         if !report.structured_data.is_empty() {
-            score += score_config.structured_data_bonus;
+            issue_score += score_config.structured_data_bonus;
         }
 
-        score.clamp(0.0, 100.0)
+        issue_score = issue_score.clamp(0.0, 100.0);
+
+        let Some(performance_score) = Self::calculate_performance_score(snapshot) else {
+            return issue_score;
+        };
+
+        let issue_weight = score_config.issue_weight.max(0.0);
+        let performance_weight = score_config.performance_weight.max(0.0);
+        let total_weight = issue_weight + performance_weight;
+        if total_weight <= f64::EPSILON {
+            return issue_score;
+        }
+
+        ((issue_score * issue_weight) + (performance_score * performance_weight)) / total_weight
+    }
+
+    fn calculate_performance_score(snapshot: &Snapshot) -> Option<f64> {
+        let timing = &snapshot.performance_timing;
+        let nav_start = timing.navigation_start;
+        if nav_start == 0 {
+            return None;
+        }
+
+        let mut weighted_scores = Vec::new();
+
+        if let Some(ttfb_ms) = Self::timing_delta(timing.response_start, nav_start) {
+            weighted_scores.push((
+                Self::log_normal_metric_score(ttfb_ms as f64, 800.0, 1800.0),
+                0.25,
+            ));
+        }
+
+        if let Some(fcp_ms) = Self::timing_delta(timing.first_contentful_paint, nav_start) {
+            weighted_scores.push((
+                Self::log_normal_metric_score(fcp_ms as f64, 1800.0, 3000.0),
+                0.25,
+            ));
+        }
+
+        if let Some(lcp_ms) = Self::timing_delta(timing.largest_contentful_paint, nav_start) {
+            weighted_scores.push((
+                Self::log_normal_metric_score(lcp_ms as f64, 2500.0, 4000.0),
+                0.3,
+            ));
+        }
+
+        if let Some(cls) = timing.cumulative_layout_shift {
+            if cls >= 0.0 {
+                weighted_scores
+                    .push((Self::log_normal_metric_score(cls.max(0.01), 0.1, 0.25), 0.1));
+            }
+        }
+
+        if let Some(inp_ms) = timing.interaction_to_next_paint {
+            weighted_scores.push((
+                Self::log_normal_metric_score(inp_ms as f64, 200.0, 500.0),
+                0.1,
+            ));
+        }
+
+        if weighted_scores.is_empty() {
+            return None;
+        }
+
+        let total_weight: f64 = weighted_scores.iter().map(|(_, w)| *w).sum();
+        let normalized: f64 = weighted_scores
+            .iter()
+            .map(|(score, weight)| score * weight)
+            .sum::<f64>()
+            / total_weight;
+
+        Some((normalized * 100.0).clamp(0.0, 100.0))
+    }
+
+    fn log_normal_metric_score(value: f64, p10: f64, median: f64) -> f64 {
+        if value <= 0.0 || p10 <= 0.0 || median <= 0.0 || p10 >= median {
+            return 0.0;
+        }
+
+        let z_10 = 1.281_551_565_544_600_4_f64;
+        let location = median.ln();
+        let shape = ((median.ln() - p10.ln()) / z_10).max(1e-6);
+        let standardized = (value.ln() - location) / shape;
+        let cdf = Self::normal_cdf(standardized);
+
+        (1.0 - cdf).clamp(0.0, 1.0)
+    }
+
+    fn normal_cdf(x: f64) -> f64 {
+        0.5 * (1.0 + Self::erf_approximation(x / std::f64::consts::SQRT_2))
+    }
+
+    fn erf_approximation(x: f64) -> f64 {
+        let sign = if x < 0.0 { -1.0 } else { 1.0 };
+        let x = x.abs();
+        let a1 = 0.254_829_592_f64;
+        let a2 = -0.284_496_736_f64;
+        let a3 = 1.421_413_741_f64;
+        let a4 = -1.453_152_027_f64;
+        let a5 = 1.061_405_429_f64;
+        let p = 0.327_591_1_f64;
+
+        let t = 1.0 / (1.0 + p * x);
+        let y = 1.0 - (((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t) * (-x * x).exp();
+
+        sign * y
     }
 
     // =========================================================================
@@ -1417,6 +1603,9 @@ mod tests {
                 response_start: None,
                 first_paint: None,
                 first_contentful_paint: None,
+                largest_contentful_paint: None,
+                cumulative_layout_shift: None,
+                interaction_to_next_paint: None,
             },
             computed_styles: Vec::new(),
             referenced_assets: crate::snapshot::ReferencedAssets::default(),
@@ -1871,6 +2060,10 @@ mod tests {
                 failure_text: None,
                 content_encoding: None,
                 mime_type: Some("application/javascript".to_string()),
+                request_start_time_s: None,
+                response_start_time_s: None,
+                end_time_s: None,
+                duration_ms: None,
             });
         snapshot
             .network_requests
@@ -1885,6 +2078,10 @@ mod tests {
                 failure_text: None,
                 content_encoding: Some("gzip".to_string()),
                 mime_type: Some("text/html".to_string()),
+                request_start_time_s: None,
+                response_start_time_s: None,
+                end_time_s: None,
+                duration_ms: None,
             });
         snapshot
             .network_requests
@@ -1899,6 +2096,10 @@ mod tests {
                 failure_text: Some("net::ERR_CONNECTION_RESET".to_string()),
                 content_encoding: None,
                 mime_type: Some("text/css".to_string()),
+                request_start_time_s: None,
+                response_start_time_s: None,
+                end_time_s: None,
+                duration_ms: None,
             });
 
         let report = SeoAnalyzer::analyze(&snapshot);
@@ -1917,6 +2118,122 @@ mod tests {
         assert!(report.issues.iter().any(
             |i| i.category == "best-practices" && i.message.contains("failed network request")
         ));
+    }
+
+    #[test]
+    fn analyze_network_waterfall_and_critical_path_signals() {
+        let html = r#"
+            <!doctype html>
+            <html><head><meta charset="utf-8"><title>Waterfall Test</title></head>
+            <body><h1>Title</h1></body></html>
+        "#;
+
+        let mut snapshot = snapshot_with_html(html);
+        snapshot
+            .network_requests
+            .push(crate::snapshot::NetworkRequestRecord {
+                url: "https://example.com/".to_string(),
+                resource_type: Some("Document".to_string()),
+                status_code: Some(200),
+                encoded_data_length: Some(15_000.0),
+                from_cache: Some(false),
+                was_redirect: Some(false),
+                failed: Some(false),
+                failure_text: None,
+                content_encoding: Some("gzip".to_string()),
+                mime_type: Some("text/html".to_string()),
+                request_start_time_s: Some(1.0),
+                response_start_time_s: Some(1.2),
+                end_time_s: Some(3.6),
+                duration_ms: Some(2_600.0),
+            });
+        snapshot
+            .network_requests
+            .push(crate::snapshot::NetworkRequestRecord {
+                url: "https://example.com/app.js".to_string(),
+                resource_type: Some("Script".to_string()),
+                status_code: Some(200),
+                encoded_data_length: Some(120_000.0),
+                from_cache: Some(false),
+                was_redirect: Some(false),
+                failed: Some(false),
+                failure_text: None,
+                content_encoding: Some("gzip".to_string()),
+                mime_type: Some("application/javascript".to_string()),
+                request_start_time_s: Some(1.3),
+                response_start_time_s: Some(1.5),
+                end_time_s: Some(5.2),
+                duration_ms: Some(3_900.0),
+            });
+
+        let report = SeoAnalyzer::analyze(&snapshot);
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.category == "performance" && i.message.contains("waterfall window")));
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.category == "performance" && i.message.contains("Critical path candidate")));
+    }
+
+    #[test]
+    fn core_web_vitals_style_scoring_prefers_faster_pages() {
+        let html = r#"
+            <!doctype html>
+            <html><head><meta charset="utf-8"><title>Perf Score Test</title></head>
+            <body><h1>Title</h1></body></html>
+        "#;
+
+        let mut fast = snapshot_with_html(html);
+        fast.performance_timing.navigation_start = 1_000;
+        fast.performance_timing.response_start = Some(1_150);
+        fast.performance_timing.first_contentful_paint = Some(2_500);
+        fast.performance_timing.largest_contentful_paint = Some(3_200);
+        fast.performance_timing.cumulative_layout_shift = Some(0.08);
+        fast.performance_timing.interaction_to_next_paint = Some(180);
+
+        let mut slow = snapshot_with_html(html);
+        slow.performance_timing.navigation_start = 1_000;
+        slow.performance_timing.response_start = Some(3_100);
+        slow.performance_timing.first_contentful_paint = Some(7_000);
+        slow.performance_timing.largest_contentful_paint = Some(9_500);
+        slow.performance_timing.cumulative_layout_shift = Some(0.35);
+        slow.performance_timing.interaction_to_next_paint = Some(900);
+
+        let fast_report = SeoAnalyzer::analyze(&fast);
+        let slow_report = SeoAnalyzer::analyze(&slow);
+
+        assert!(
+            fast_report.score > slow_report.score,
+            "Faster vitals should produce higher score (fast={}, slow={})",
+            fast_report.score,
+            slow_report.score
+        );
+    }
+
+    #[test]
+    fn core_web_vitals_scoring_uses_partial_metrics_when_available() {
+        let html = r#"
+            <!doctype html>
+            <html><head><meta charset="utf-8"><title>Partial Perf Test</title></head>
+            <body><h1>Title</h1></body></html>
+        "#;
+
+        let mut with_perf = snapshot_with_html(html);
+        with_perf.performance_timing.navigation_start = 500;
+        with_perf.performance_timing.response_start = Some(1_200);
+        with_perf.performance_timing.first_contentful_paint = Some(3_400);
+
+        let without_perf = snapshot_with_html(html);
+
+        let with_perf_report = SeoAnalyzer::analyze(&with_perf);
+        let without_perf_report = SeoAnalyzer::analyze(&without_perf);
+
+        assert_ne!(
+            with_perf_report.score, without_perf_report.score,
+            "Available vitals should influence final score"
+        );
     }
 
     #[test]
