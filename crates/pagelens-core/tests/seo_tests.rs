@@ -42,12 +42,9 @@ async fn nextjs_homepage_has_open_graph_tags() {
         return;
     }
 
-    common::assert_has_meta_tags(
-        &common::nextjs_url(),
-        &["og:title", "og:description"],
-    )
-    .await
-    .expect("Should have Open Graph tags");
+    common::assert_has_meta_tags(&common::nextjs_url(), &["og:title", "og:description"])
+        .await
+        .expect("Should have Open Graph tags");
 }
 
 #[tokio::test]
@@ -207,7 +204,7 @@ async fn svelte_seo_test_page_has_issues() {
                 "best-practices",
                 "performance",
             ]
-                .contains(&issue.category.as_str()),
+            .contains(&issue.category.as_str()),
             "Issue category '{}' is not a known category",
             issue.category
         );

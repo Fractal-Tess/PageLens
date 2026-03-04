@@ -63,13 +63,13 @@ async fn can_launch_and_shutdown_browser() {
     let browser = Browser::launch().await.expect("Should launch browser");
 
     // Browser should be connected
-    assert!(browser.is_connected(), "Browser should be connected after launch");
+    assert!(
+        browser.is_connected(),
+        "Browser should be connected after launch"
+    );
 
     // Explicit shutdown should work (consumes browser)
-    browser
-        .shutdown()
-        .await
-        .expect("Should shutdown cleanly");
+    browser.shutdown().await.expect("Should shutdown cleanly");
 }
 
 #[tokio::test]
@@ -104,8 +104,12 @@ async fn can_navigate_to_nextjs_homepage() {
             .expect("Should capture snapshot");
 
         assert!(!snapshot.html.is_empty(), "Page should have content");
-        assert!(snapshot.html.contains("<html"), "Page should contain html tag");
-    }).await;
+        assert!(
+            snapshot.html.contains("<html"),
+            "Page should contain html tag"
+        );
+    })
+    .await;
 
     if result.is_err() {
         panic!("Test timed out after 30 seconds - test apps may not be running. Run 'bun run start-apps' first.");
@@ -128,8 +132,12 @@ async fn can_navigate_to_svelte_homepage() {
             .expect("Should capture snapshot");
 
         assert!(!snapshot.html.is_empty(), "Page should have content");
-        assert!(snapshot.html.contains("<html"), "Page should contain html tag");
-    }).await;
+        assert!(
+            snapshot.html.contains("<html"),
+            "Page should contain html tag"
+        );
+    })
+    .await;
 
     if result.is_err() {
         panic!("Test timed out after 30 seconds - test apps may not be running. Run 'bun run start-apps' first.");
@@ -164,7 +172,8 @@ async fn can_get_page_title_from_nextjs() {
             "Title should contain 'about', got: {}",
             title
         );
-    }).await;
+    })
+    .await;
 
     if result.is_err() {
         panic!("Test timed out after 30 seconds - test apps may not be running. Run 'bun run start-apps' first.");
@@ -193,7 +202,8 @@ async fn can_get_page_title_from_svelte() {
 
         // The homepage should have a title
         assert!(!title.is_empty(), "Title should not be empty");
-    }).await;
+    })
+    .await;
 
     if result.is_err() {
         panic!("Test timed out after 30 seconds - test apps may not be running. Run 'bun run start-apps' first.");
@@ -217,13 +227,11 @@ async fn can_navigate_to_example_com() {
 
         // The about page should have meaningful content
         assert!(!html.is_empty(), "Should have HTML content");
-        assert!(
-            html.contains("<html"),
-            "Should contain html tag"
-        );
+        assert!(html.contains("<html"), "Should contain html tag");
 
         browser.shutdown().await.ok();
-    }).await;
+    })
+    .await;
 
     if result.is_err() {
         panic!("Test timed out after 30 seconds - test apps may not be running. Run 'bun run start-apps' first.");
@@ -262,7 +270,8 @@ async fn navigation_to_nonexistent_host_fails_gracefully() {
         );
 
         browser.shutdown().await.ok();
-    }).await;
+    })
+    .await;
 
     if result.is_err() {
         panic!("Test timed out after 30 seconds");
