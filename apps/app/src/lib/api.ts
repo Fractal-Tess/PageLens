@@ -57,6 +57,56 @@ export interface FaviconAnalysisResult {
   default_favicon_url: string;
   candidates: FaviconCandidate[];
   warnings: string[];
+  has_web_app_manifest: boolean;
+  has_touch_icon: boolean;
+  touch_web_app_title: string | null;
+  has_svg_favicon: boolean;
+  has_desktop_png_favicon: boolean;
+  ico_declared: boolean;
+  ico_found: boolean;
+  ico_sizes: string[];
+  ico_extra_sizes: string[];
+  ico_missing_sizes: string[];
+  audit_messages: string[];
+  candidate_reports: Array<{
+    url: string;
+    rel: string;
+    source: string;
+    mime_type: string | null;
+    declared_sizes: string | null;
+    format: string | null;
+    file_size_bytes: number | null;
+    detected_dimensions: string[];
+    contrast_on_light: number | null;
+    contrast_on_dark: number | null;
+    issues: string[];
+    recommendations: string[];
+  }>;
+  global_recommendations: string[];
+}
+
+export interface PwaManifestSummary {
+  manifest_url: string;
+  name: string | null;
+  short_name: string | null;
+  start_url: string | null;
+  display: string | null;
+  theme_color: string | null;
+  background_color: string | null;
+  icon_count: number;
+}
+
+export interface PwaAnalysisResult {
+  input_url: string;
+  resolved_page_url: string;
+  has_manifest: boolean;
+  manifest: PwaManifestSummary | null;
+  has_service_worker_registration: boolean;
+  has_theme_color_meta: boolean;
+  apple_touch_icon_count: number;
+  mask_icon_count: number;
+  installability_score: number;
+  warnings: string[];
 }
 
 export interface AnalysisSummary {
@@ -363,6 +413,16 @@ export async function analyzeFavicon(
     body: JSON.stringify({ url }),
   });
   if (!res.ok) throw new Error(`Failed to analyze favicon: ${res.status}`);
+  return res.json();
+}
+
+export async function analyzePwa(url: string): Promise<PwaAnalysisResult> {
+  const res = await fetch(`${BASE_URL}/api/tools/pwa`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) throw new Error(`Failed to analyze PWA: ${res.status}`);
   return res.json();
 }
 

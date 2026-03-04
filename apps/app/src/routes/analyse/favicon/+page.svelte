@@ -30,6 +30,13 @@
 			loading = false;
 		}
 	}
+
+	function formatBytes(bytes: number | null): string {
+		if (bytes == null) return '—';
+		if (bytes < 1024) return `${bytes} B`;
+		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+		return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+	}
 </script>
 
 <svelte:head>
@@ -151,6 +158,83 @@
 			</div>
 		</div>
 
+		<div class="mt-6 mb-3 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">Issues and recommendations</div>
+		<div class="grid grid-cols-1 gap-px bg-border md:grid-cols-2">
+			<div class="bg-background p-5">
+				<div class="mb-3 text-[10px] tracking-widest text-muted-foreground uppercase">Audit checks</div>
+				<div class="space-y-1.5 text-xs">
+					{#each result.audit_messages as message}
+						<div class="font-mono text-foreground/90">• {message}</div>
+					{/each}
+				</div>
+			</div>
+			<div class="bg-background p-5">
+				<div class="mb-3 text-[10px] tracking-widest text-muted-foreground uppercase">Global recommendations</div>
+				{#if result.global_recommendations.length > 0}
+					<div class="space-y-1.5 text-xs text-muted-foreground">
+						{#each result.global_recommendations as recommendation}
+							<div>• {recommendation}</div>
+						{/each}
+					</div>
+				{:else}
+					<div class="text-xs text-green-400">No global recommendations. Current favicon setup looks healthy.</div>
+				{/if}
+			</div>
+		</div>
+
+		<div class="mt-6 mb-3 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">Per-icon diagnostics</div>
+		<div class="border border-border bg-background">
+			<div class="grid gap-px bg-border md:grid-cols-2">
+				{#each result.candidate_reports as report}
+					<div class="bg-background p-5">
+						<div class="mb-2 break-all font-mono text-[11px] text-muted-foreground">{report.url}</div>
+						<div class="mb-4 grid grid-cols-2 gap-px bg-border text-[10px]">
+							<div class="bg-background px-3 py-2">
+								<div class="mb-1 tracking-widest text-muted-foreground uppercase">Format</div>
+								<div class="font-mono text-foreground/90 uppercase">{report.format ?? '—'}</div>
+							</div>
+							<div class="bg-background px-3 py-2">
+								<div class="mb-1 tracking-widest text-muted-foreground uppercase">File size</div>
+								<div class="font-mono text-foreground/90">{formatBytes(report.file_size_bytes)}</div>
+							</div>
+							<div class="bg-background px-3 py-2">
+								<div class="mb-1 tracking-widest text-muted-foreground uppercase">Dimensions</div>
+								<div class="font-mono text-foreground/90">{report.detected_dimensions.length > 0 ? report.detected_dimensions.join(', ') : '—'}</div>
+							</div>
+							<div class="bg-background px-3 py-2">
+								<div class="mb-1 tracking-widest text-muted-foreground uppercase">Contrast</div>
+								<div class="font-mono text-foreground/90">
+									L {report.contrast_on_light != null ? report.contrast_on_light.toFixed(2) : '—'} / D {report.contrast_on_dark != null ? report.contrast_on_dark.toFixed(2) : '—'}
+								</div>
+							</div>
+						</div>
+
+						{#if report.issues.length > 0}
+							<div class="mb-3 border border-destructive/40 bg-destructive/10 px-3 py-2">
+								<div class="mb-1 text-[10px] tracking-widest text-destructive uppercase">Issues</div>
+								<div class="space-y-1 text-xs text-destructive/90">
+									{#each report.issues as issue}
+										<div>• {issue}</div>
+									{/each}
+								</div>
+							</div>
+						{/if}
+
+						{#if report.recommendations.length > 0}
+							<div class="border border-primary/30 bg-primary/5 px-3 py-2">
+								<div class="mb-1 text-[10px] tracking-widest text-primary uppercase">Recommendations</div>
+								<div class="space-y-1 text-xs text-muted-foreground">
+									{#each report.recommendations as recommendation}
+										<div>• {recommendation}</div>
+									{/each}
+								</div>
+							</div>
+						{/if}
+					</div>
+				{/each}
+			</div>
+		</div>
+
 		{#if result.warnings.length > 0}
 			<div class="mt-6 border border-yellow-500/40 bg-yellow-500/10 px-4 py-3">
 				<div class="mb-2 text-[10px] tracking-widest text-yellow-300 uppercase">Warnings</div>
@@ -167,8 +251,8 @@
 		<a href="/analyse/benchmark" class="text-[10px] tracking-widest text-muted-foreground uppercase transition-colors hover:text-foreground">
 			← HTTP BENCHMARK
 		</a>
-		<a href="/" class="text-[10px] tracking-widest text-primary uppercase transition-colors hover:text-primary/80">
-			ALL MODES →
+		<a href="/analyse/pwa" class="text-[10px] tracking-widest text-primary uppercase transition-colors hover:text-primary/80">
+			PWA ANALYZER →
 		</a>
 	</div>
 </div>

@@ -37,6 +37,15 @@
 			desc: 'Inspect favicon coverage for any page. Resolve HTML icon declarations, compare fallback paths, and preview candidate icon files in one pass.',
 			tags: ['Icon discovery', 'Rel/sizes metadata', 'Default fallback', 'Candidate preview', 'Brand consistency', 'Asset quality'],
 			meta: 'Single URL · Brand icon audit'
+		},
+		{
+			id: '05',
+			href: '/analyse/pwa',
+			title: 'PWA',
+			subtitle: 'ANALYZER',
+			desc: 'Validate progressive web app readiness: manifest quality, service worker registration hints, theme metadata, and touch icon support.',
+			tags: ['Manifest', 'Service worker', 'Installability', 'Theme color', 'Touch icons', 'PWA score'],
+			meta: 'Single URL · PWA readiness'
 		}
 	] as const;
 </script>
