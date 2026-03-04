@@ -4,7 +4,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite dev --port ${SVELTE_PORT:-5174}",
     "build": "vite build",
     "start": "vite preview --port ${SVELTE_PORT:-44792} --host",
     "preview": "vite preview --port ${SVELTE_PORT:-4173} --host",
