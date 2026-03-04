@@ -13,6 +13,7 @@ use pagelens_db::{
     HistoryListItem, UpdateAnalysisRun,
 };
 use prelude::*;
+use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -230,6 +231,29 @@ pub struct RunEvent {
     pub live_connections: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub live_target_duration_secs: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaviconAnalyzeInput {
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaviconCandidate {
+    pub url: String,
+    pub rel: String,
+    pub sizes: Option<String>,
+    pub mime_type: Option<String>,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaviconAnalyzeResponse {
+    pub input_url: String,
+    pub resolved_page_url: String,
+    pub default_favicon_url: String,
+    pub candidates: Vec<FaviconCandidate>,
+    pub warnings: Vec<String>,
 }
 
 impl RunEvent {
@@ -697,6 +721,119 @@ impl AppService {
     pub fn list_run_assets(&self, run_id: &str) -> Result<Vec<AnalysisAsset>> {
         let db = Database::open(&self.db_path)?;
         Ok(db.analysis_repository().list_assets(run_id)?)
+    }
+
+    pub async fn analyze_favicon(&self, input: FaviconAnalyzeInput) -> Result<FaviconAnalyzeResponse> {
+        let input_url = input.url.trim();
+        if input_url.is_empty() {
+            return Err(Error::Message("URL is required".to_string()));
+        }
+
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::limited(10))
+            .build()
+            .map_err(|err| Error::Message(format!("Failed to build HTTP client: {err}")))?;
+
+        let response = client
+            .get(input_url)
+            .send()
+            .await
+            .map_err(|err| Error::Message(format!("Failed to fetch URL: {err}")))?
+            .error_for_status()
+            .map_err(|err| Error::Message(format!("Page request failed: {err}")))?;
+
+        let resolved_page_url = response.url().clone();
+        let html = response
+            .text()
+            .await
+            .map_err(|err| Error::Message(format!("Failed to read page body: {err}")))?;
+
+        let default_favicon_url = resolved_page_url
+            .join("/favicon.ico")
+            .map_err(|err| Error::Message(format!("Failed to resolve default favicon URL: {err}")))?
+            .to_string();
+
+        let document = Html::parse_document(&html);
+        let selector = Selector::parse("link")
+            .map_err(|err| Error::Message(format!("Failed to parse selector: {err}")))?;
+
+        let mut warnings = Vec::new();
+        let mut seen = HashSet::new();
+        let mut candidates = Vec::new();
+
+        for element in document.select(&selector) {
+            let Some(rel_raw) = element.value().attr("rel") else {
+                continue;
+            };
+
+            let rel_tokens: Vec<String> = rel_raw
+                .split_ascii_whitespace()
+                .map(|token| token.trim().to_ascii_lowercase())
+                .filter(|token| !token.is_empty())
+                .collect();
+            let is_icon = rel_tokens
+                .iter()
+                .any(|token| token == "icon" || token == "shortcut");
+            if !is_icon {
+                continue;
+            }
+
+            let Some(href) = element.value().attr("href") else {
+                warnings.push("Found icon rel without href".to_string());
+                continue;
+            };
+
+            let resolved_icon_url = match resolved_page_url.join(href) {
+                Ok(url) => url,
+                Err(err) => {
+                    warnings.push(format!("Could not resolve icon href '{href}': {err}"));
+                    continue;
+                }
+            };
+
+            let icon_url = resolved_icon_url.to_string();
+            if !seen.insert(icon_url.clone()) {
+                continue;
+            }
+
+            candidates.push(FaviconCandidate {
+                url: icon_url,
+                rel: rel_raw.to_string(),
+                sizes: element.value().attr("sizes").map(str::to_string),
+                mime_type: element.value().attr("type").map(str::to_string),
+                source: "html_link".to_string(),
+            });
+        }
+
+        if seen.insert(default_favicon_url.clone()) {
+            candidates.push(FaviconCandidate {
+                url: default_favicon_url.clone(),
+                rel: "icon".to_string(),
+                sizes: None,
+                mime_type: None,
+                source: "default_path".to_string(),
+            });
+        }
+
+        if candidates.is_empty() {
+            warnings.push("No favicon candidates discovered".to_string());
+        }
+
+        info!(
+            input_url = %input_url,
+            resolved_page_url = %resolved_page_url,
+            candidate_count = candidates.len(),
+            warning_count = warnings.len(),
+            "Favicon analysis completed"
+        );
+
+        Ok(FaviconAnalyzeResponse {
+            input_url: input_url.to_string(),
+            resolved_page_url: resolved_page_url.to_string(),
+            default_favicon_url,
+            candidates,
+            warnings,
+        })
     }
 
     async fn mark_run_failed(&self, run_id: &str, message: String) -> Result<()> {

@@ -28,6 +28,15 @@
 			desc: 'Stress test any HTTP endpoint with concurrent requests. Measure RPS, p50/p95/p99 latency, throughput, and failure rates under load.',
 			tags: ['Load testing', 'Requests/sec', 'Latency p95/p99', 'Concurrency', 'Status codes', 'Error rates'],
 			meta: 'Single endpoint · Load test'
+		},
+		{
+			id: '04',
+			href: '/analyse/favicon',
+			title: 'FAVICON',
+			subtitle: 'ANALYZER',
+			desc: 'Inspect favicon coverage for any page. Resolve HTML icon declarations, compare fallback paths, and preview candidate icon files in one pass.',
+			tags: ['Icon discovery', 'Rel/sizes metadata', 'Default fallback', 'Candidate preview', 'Brand consistency', 'Asset quality'],
+			meta: 'Single URL · Brand icon audit'
 		}
 	] as const;
 </script>

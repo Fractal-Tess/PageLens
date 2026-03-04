@@ -4,7 +4,7 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use pagelens_app::{AnalyseUrlInput, AppService, EditRunInput};
+use pagelens_app::{AnalyseUrlInput, AppService, EditRunInput, FaviconAnalyzeInput};
 use pagelens_logging::{error, info, warn};
 use serde::Deserialize;
 use std::convert::Infallible;
@@ -33,6 +33,11 @@ struct ApiState {
 struct HistoryQuery {
     limit: Option<i64>,
     offset: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FaviconAnalyzeRequest {
+    url: String,
 }
 
 pub async fn serve(config: ApiConfig) -> Result<(), String> {
@@ -65,6 +70,7 @@ pub fn router(service: AppService) -> Router {
         .route("/api/runs/{run_id}/assets", get(get_run_assets))
         .route("/api/runs/{run_id}/events", get(run_events))
         .route("/api/history", get(list_history))
+        .route("/api/tools/favicon", post(analyze_favicon))
         .nest_service("/api/assets", ServeDir::new(assets_dir))
         .with_state(state)
         .layer(TraceLayer::new_for_http())
@@ -165,6 +171,19 @@ async fn list_history(
         .list_history(limit, offset)
         .map_err(ApiError::internal)?;
     Ok(Json(serde_json::json!(items)))
+}
+
+async fn analyze_favicon(
+    State(state): State<ApiState>,
+    Json(input): Json<FaviconAnalyzeRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    info!(url = %input.url, "Received favicon analysis request");
+    let response = state
+        .service
+        .analyze_favicon(FaviconAnalyzeInput { url: input.url })
+        .await
+        .map_err(ApiError::from_app)?;
+    Ok(Json(serde_json::json!(response)))
 }
 
 async fn run_events(

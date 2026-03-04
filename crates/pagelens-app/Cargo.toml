@@ -12,6 +12,7 @@ pagelens-core = { workspace = true }
 pagelens-db = { workspace = true }
 pagelens-logging = { workspace = true }
 reqwest = { workspace = true }
+scraper = "0.22"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

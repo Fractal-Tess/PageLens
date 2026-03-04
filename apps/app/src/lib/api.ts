@@ -43,6 +43,22 @@ export interface StartAnalysisResponse {
   run_id: string;
 }
 
+export interface FaviconCandidate {
+  url: string;
+  rel: string;
+  sizes: string | null;
+  mime_type: string | null;
+  source: "html_link" | "default_path" | string;
+}
+
+export interface FaviconAnalysisResult {
+  input_url: string;
+  resolved_page_url: string;
+  default_favicon_url: string;
+  candidates: FaviconCandidate[];
+  warnings: string[];
+}
+
 export interface AnalysisSummary {
   seo_score: number | null;
   page_count: number;
@@ -335,6 +351,18 @@ export async function startAnalysis(
     body: JSON.stringify(req),
   });
   if (!res.ok) throw new Error(`Failed to start analysis: ${res.status}`);
+  return res.json();
+}
+
+export async function analyzeFavicon(
+  url: string,
+): Promise<FaviconAnalysisResult> {
+  const res = await fetch(`${BASE_URL}/api/tools/favicon`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) throw new Error(`Failed to analyze favicon: ${res.status}`);
   return res.json();
 }
 
