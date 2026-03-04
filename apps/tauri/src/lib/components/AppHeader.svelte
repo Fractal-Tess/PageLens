@@ -1,93 +1,91 @@
 <script lang="ts">
-  import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
-  import { location, link } from 'svelte-spa-router'
-  import { commands } from '$lib/ipc'
-  import { SidebarTrigger } from '@pagelens/ui/shadcn/sidebar'
-  import { Separator } from '@pagelens/ui/shadcn/separator'
-  import { Button } from '@pagelens/ui/shadcn/button'
-  import { Badge } from '@pagelens/ui/shadcn/badge'
-  import * as Breadcrumb from '@pagelens/ui/shadcn/breadcrumb'
-  import { Github, Minus, X } from '@lucide/svelte'
+  import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+  import { location, link } from 'svelte-spa-router';
+  import { commands } from '$lib/ipc';
+  import { SidebarTrigger } from '@pagelens/ui/shadcn/sidebar';
+  import { Separator } from '@pagelens/ui/shadcn/separator';
+  import { Button } from '@pagelens/ui/shadcn/button';
+  import { Badge } from '@pagelens/ui/shadcn/badge';
+  import * as Breadcrumb from '@pagelens/ui/shadcn/breadcrumb';
+  import { Github, Minus, X } from '@lucide/svelte';
 
-  const appWindow = getCurrentWebviewWindow()
+  const appWindow = getCurrentWebviewWindow();
 
-  type Crumb = {
-    label: string
-    href?: string
-  }
-
-  type RunStatus = 'pending' | 'running' | 'completed' | 'failed'
+  type Crumb = { label: string; href?: string };
+  type RunStatus = 'pending' | 'running' | 'completed' | 'failed';
 
   function shortId(value: string): string {
-    return value.length <= 8 ? value : value.slice(0, 8)
+    return value.length <= 8 ? value : value.slice(0, 8);
   }
 
   function breadcrumbsFromPath(rawLocation: string): Crumb[] {
-    const locationWithoutQuery = rawLocation.split('?')[0] ?? ''
+    const locationWithoutQuery = rawLocation.split('?')[0] ?? '';
     const normalized = locationWithoutQuery.startsWith('/#')
       ? `/${locationWithoutQuery.slice(2)}`
-      : locationWithoutQuery
+      : locationWithoutQuery;
 
-    if (!normalized || normalized === '/') {
-      return [{ label: 'Dashboard' }]
-    }
-    if (normalized === '/simple') return [{ label: 'Simple' }]
-    if (normalized === '/advanced') return [{ label: 'Advanced' }]
-    if (normalized === '/profiles') return [{ label: 'Profiles' }]
-    if (normalized === '/history') return [{ label: 'History' }]
+    if (!normalized || normalized === '/') return [{ label: 'Dashboard' }];
+    if (normalized === '/simple') return [{ label: 'Simple' }];
+    if (normalized === '/advanced') return [{ label: 'Advanced' }];
+    if (normalized === '/profiles') return [{ label: 'Profiles' }];
+    if (normalized === '/history') return [{ label: 'History' }];
 
-    const segments = normalized.split('/').filter(Boolean)
+    const segments = normalized.split('/').filter(Boolean);
     if (segments[0] === 'run' && segments[1]) {
       if (segments[2] === 'page' && segments[3]) {
         return [
           { label: `Run ${shortId(segments[1])}`, href: `/run/${segments[1]}` },
-          { label: `Page ${shortId(segments[3])}` }
-        ]
+          { label: `Page ${shortId(segments[3])}` },
+        ];
       }
-      return [{ label: `Run ${shortId(segments[1])}` }]
+      return [{ label: `Run ${shortId(segments[1])}` }];
     }
 
     if (segments[0] === 'report' && segments[1]) {
-      return [{ label: `Report ${shortId(segments[1])}` }]
+      return [{ label: `Report ${shortId(segments[1])}` }];
     }
 
-    return [{ label: 'PageLens' }]
+    return [{ label: 'PageLens' }];
   }
 
   function runIdFromPath(rawLocation: string): string | null {
-    const locationWithoutQuery = rawLocation.split('?')[0] ?? ''
+    const locationWithoutQuery = rawLocation.split('?')[0] ?? '';
     const normalized = locationWithoutQuery.startsWith('/#')
       ? `/${locationWithoutQuery.slice(2)}`
-      : locationWithoutQuery
-    const segments = normalized.split('/').filter(Boolean)
-    if (segments[0] === 'run' && segments[1]) return segments[1]
-    return null
+      : locationWithoutQuery;
+    const segments = normalized.split('/').filter(Boolean);
+    return segments[0] === 'run' && segments[1] ? segments[1] : null;
   }
 
-  let currentRunStatus = $state<RunStatus | null>(null)
-  let statusLoadNonce = 0
+  let currentRunStatus = $state<RunStatus | null>(null);
+  let statusLoadNonce = 0;
 
   $effect(() => {
-    const runId = runIdFromPath($location || '/')
-    statusLoadNonce += 1
-    const nonce = statusLoadNonce
+    const runId = runIdFromPath($location || '/');
+    statusLoadNonce += 1;
+    const nonce = statusLoadNonce;
 
     if (!runId) {
-      currentRunStatus = null
-      return
+      currentRunStatus = null;
+      return;
     }
 
     void (async () => {
-      const result = await commands.getHistoryItem(runId)
-      if (nonce !== statusLoadNonce) return
+      const result = await commands.getHistoryItem(runId);
+      if (nonce !== statusLoadNonce) return;
       if (result.status === 'ok') {
-        const status = (result.data as { status?: RunStatus }).status
-        currentRunStatus = status ?? null
+        const status = (result.data as { status?: RunStatus }).status;
+        currentRunStatus = status ?? null;
       }
-    })()
-  })
+    })();
+  });
 
-  const breadcrumbs = $derived(breadcrumbsFromPath($location || '/'))
+  const breadcrumbs = $derived(breadcrumbsFromPath($location || '/'));
+  const statusVariant = $derived(
+    currentRunStatus === 'failed' ? 'destructive' :
+    currentRunStatus === 'completed' ? 'default' :
+    'secondary'
+  );
 </script>
 
 <header
@@ -119,19 +117,9 @@
   <div class="flex-1" data-tauri-drag-region></div>
 
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div
-    class="flex items-center gap-1"
-    ondragstart={event => event.preventDefault()}
-  >
+  <div class="flex items-center gap-1" ondragstart={(e) => e.preventDefault()}>
     {#if currentRunStatus}
-      <Badge
-        variant={currentRunStatus === 'failed'
-          ? 'destructive'
-          : currentRunStatus === 'completed'
-            ? 'default'
-            : 'secondary'}
-        class="mr-1 uppercase"
-      >
+      <Badge variant={statusVariant} class="mr-1 uppercase">
         {currentRunStatus}
       </Badge>
     {/if}
@@ -146,12 +134,7 @@
     >
       <Github class="h-4 w-4" />
     </Button>
-    <Button
-      variant="ghost"
-      size="icon"
-      class="h-7 w-7"
-      onclick={() => appWindow.minimize()}
-    >
+    <Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => appWindow.minimize()}>
       <Minus class="h-4 w-4" />
     </Button>
     <Button

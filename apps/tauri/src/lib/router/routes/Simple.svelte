@@ -1,50 +1,45 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
-  import { Button } from '@pagelens/ui/shadcn/button'
-  import { Input } from '@pagelens/ui/shadcn/input'
-  import { Label } from '@pagelens/ui/shadcn/label'
+  import { onMount } from 'svelte';
+  import { push } from 'svelte-spa-router';
+  import { toast } from 'svelte-sonner';
+  import { Separator } from '@pagelens/ui/shadcn/separator';
   import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle
-  } from '@pagelens/ui/shadcn/card'
-  import { Checkbox } from '@pagelens/ui/shadcn/checkbox'
-  import { Separator } from '@pagelens/ui/shadcn/separator'
-  import { Scan, Loader2 } from '@lucide/svelte'
-  import { push } from 'svelte-spa-router'
-  import { toast } from 'svelte-sonner'
-  import { commands } from '$lib/ipc'
+    PageHeader,
+    AnalysisForm,
+    AnalysisProgress,
+    analysisStore,
+    createSingleOptionsStore,
+    DEFAULT_SINGLE_OPTIONS,
+  } from '@pagelens/ui';
+  import { Scan } from '@lucide/svelte';
+  import { commands } from '$lib/ipc';
 
-  let url = $state('')
-  let name = $state('')
-  let isRunning = $state(false)
-
-  let includeAccessibilityTree = $state(true)
-  let includePerformanceTiming = $state(true)
-
+  // Local state
+  const singleOptions = createSingleOptionsStore(DEFAULT_SINGLE_OPTIONS);
+  
   onMount(() => {
-    const hash = window.location.hash
-    const queryIndex = hash.indexOf('?')
-    if (queryIndex === -1) return
-    const query = hash.slice(queryIndex + 1)
-    const params = new URLSearchParams(query)
-    const prefilledUrl = params.get('url')
+    const hash = window.location.hash;
+    const queryIndex = hash.indexOf('?');
+    if (queryIndex === -1) return;
+    
+    const params = new URLSearchParams(hash.slice(queryIndex + 1));
+    const prefilledUrl = params.get('url');
     if (prefilledUrl) {
-      url = prefilledUrl
+      analysisStore.setUrl(prefilledUrl);
     }
-  })
+  });
 
-  async function runSimpleAnalysis() {
+  async function handleSubmit() {
+    const { url, name } = $analysisStore;
+    
     if (!url.trim()) {
-      toast.error('Please enter a URL')
-      return
+      toast.error('Please enter a URL');
+      return;
     }
 
-    isRunning = true
-    const runId = crypto.randomUUID()
-    push(`/run/${runId}`)
+    const runId = crypto.randomUUID();
+    analysisStore.start(runId);
+    push(`/run/${runId}`);
 
     try {
       const result = await commands.analyzeUrl({
@@ -52,99 +47,54 @@
         url: url.trim(),
         name: name.trim() || null,
         options: {
-          include_html: true,
-          include_accessibility_tree: includeAccessibilityTree,
-          include_performance_timing: includePerformanceTiming,
-          include_computed_styles: false
-        }
-      })
+          include_html: $singleOptions.includeHtml,
+          include_accessibility_tree: $singleOptions.includeAccessibilityTree,
+          include_performance_timing: $singleOptions.includePerformanceTiming,
+          include_computed_styles: $singleOptions.includeComputedStyles,
+        },
+      });
 
       if (result.status === 'error') {
-        throw new Error(result.error)
+        throw new Error(result.error);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      toast.error(`Analysis failed: ${message}`)
-    } finally {
-      isRunning = false
+      const message = err instanceof Error ? err.message : String(err);
+      analysisStore.fail(message);
+      toast.error(`Analysis failed: ${message}`);
     }
   }
 </script>
 
 <div class="h-full overflow-auto p-6 space-y-6">
-  <div>
-    <h1 class="text-3xl font-bold tracking-tight">Simple Analysis</h1>
-    <p class="text-sm text-muted-foreground">
-      Quick single-page scan with minimal setup.
-    </p>
+  <PageHeader
+    title="Simple Analysis"
+    description="Quick single-page scan with minimal setup."
+    icon={Scan}
+  />
+
+  <Separator />
+
+  <div class="max-w-2xl">
+    <AnalysisForm
+      type="single"
+      url={$analysisStore.url}
+      name={$analysisStore.name}
+      singleOptions={$singleOptions}
+      crawlOptions={{
+        maxPages: 50,
+        maxDepth: 3,
+        followExternalLinks: false,
+        sameSubdomainOnly: true,
+        pageTimeoutMs: 30000,
+        delayMs: 100,
+        maxConcurrency: 4,
+      }}
+      isSubmitting={$analysisStore.status === 'running'}
+      onSubmit={handleSubmit}
+      onUrlChange={analysisStore.setUrl}
+      onNameChange={analysisStore.setName}
+      onSingleOptionChange={(key, value) => singleOptions.update(s => ({ ...s, [key]: value }))}
+      onCrawlOptionChange={() => {}}
+    />
   </div>
-
-  <Card class="max-w-2xl">
-    <CardHeader>
-      <CardTitle class="flex items-center gap-2">
-        <Scan class="h-5 w-5 text-indigo-500" /> Analyze URL
-      </CardTitle>
-      <CardDescription>Enter a URL and start immediately.</CardDescription>
-    </CardHeader>
-    <CardContent class="space-y-4">
-      <div class="space-y-2">
-        <Label for="simple-url">URL</Label>
-        <Input
-          id="simple-url"
-          type="url"
-          bind:value={url}
-          disabled={isRunning}
-          placeholder="https://example.com"
-        />
-      </div>
-
-      <div class="space-y-2">
-        <Label for="simple-name">Run name (optional)</Label>
-        <Input
-          id="simple-name"
-          bind:value={name}
-          disabled={isRunning}
-          placeholder="Homepage quick check"
-        />
-      </div>
-
-      <Separator />
-
-      <div class="space-y-3">
-        <Label class="text-sm font-medium">Limited options</Label>
-        <div class="flex items-center space-x-2">
-          <Checkbox
-            bind:checked={includeAccessibilityTree}
-            id="simple-a11y"
-            disabled={isRunning}
-          />
-          <Label for="simple-a11y" class="text-sm font-normal"
-            >Include accessibility tree</Label
-          >
-        </div>
-        <div class="flex items-center space-x-2">
-          <Checkbox
-            bind:checked={includePerformanceTiming}
-            id="simple-performance"
-            disabled={isRunning}
-          />
-          <Label for="simple-performance" class="text-sm font-normal"
-            >Include performance timing</Label
-          >
-        </div>
-      </div>
-
-      <Button
-        class="w-full"
-        onclick={runSimpleAnalysis}
-        disabled={isRunning || !url.trim()}
-      >
-        {#if isRunning}
-          <Loader2 class="mr-2 h-4 w-4 animate-spin" /> Running...
-        {:else}
-          <Scan class="mr-2 h-4 w-4" /> Start Simple Analysis
-        {/if}
-      </Button>
-    </CardContent>
-  </Card>
 </div>

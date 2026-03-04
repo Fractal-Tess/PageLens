@@ -14,7 +14,10 @@ pub use http_benchmark::{
     HttpBenchmarkLatencyStats, HttpBenchmarkOptions, HttpBenchmarkRequestResult,
     HttpBenchmarkResult, HttpBenchmarker,
 };
-pub use seo::{Issue, ScoreConfig, SeoAnalyzer, SeoReport, Severity};
+pub use seo::{
+    HeadingsInfo, ImageInfo, Issue, MetaInfo, OpenGraphInfo, ScoreConfig, SeoAnalyzer, SeoReport,
+    Severity, StructuredData, TwitterCardInfo,
+};
 pub use site_files::{
     MiscFileReport, RobotsReport, SiteFileIssue, SiteFilesAnalyzer, SiteFilesReport,
     SitemapCrawlDiff, SitemapKind, SitemapReport,
