@@ -85,6 +85,11 @@ impl Database {
         let migrations: Vec<(i64, &str)> = vec![
             (1, include_str!("../migrations/001_initial_schema.sql")),
             (2, include_str!("../migrations/002_live_runs_and_pages.sql")),
+            (3, include_str!("../migrations/003_assets.sql")),
+            (
+                4,
+                include_str!("../migrations/004_analysis_type_http_benchmark.sql"),
+            ),
         ];
 
         // Apply pending migrations in a transaction
