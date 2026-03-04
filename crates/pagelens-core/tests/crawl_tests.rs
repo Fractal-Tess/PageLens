@@ -56,7 +56,10 @@ async fn can_crawl_single_page() {
     assert!(result.is_ok(), "Crawl should succeed");
     let crawl_result = result.unwrap();
 
-    assert!(!crawl_result.pages.is_empty(), "Should have at least 1 page");
+    assert!(
+        !crawl_result.pages.is_empty(),
+        "Should have at least 1 page"
+    );
 
     let seed_page = crawl_result
         .pages
