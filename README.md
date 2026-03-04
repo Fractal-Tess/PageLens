@@ -10,7 +10,7 @@ A website analysis tool built with Tauri, Svelte, and Rust.
 
 PageLens is a monorepo containing:
 
-- **Desktop App** (`@pagelens/dowry`): Tauri + Svelte desktop application
+- **Desktop App** (`@pagelens/tauri`): Tauri + Svelte desktop application
 - **Core Engine** (`pagelens-core`): Rust library for website analysis
 - **CLI** (`pagelens-cli`): Command-line interface
 - **Test Apps** (`@pagelens/test-apps-*`): Next.js and SvelteKit test sites
@@ -54,7 +54,7 @@ This is a monorepo using **Bun** and **Turbo**.
 ```
 pagelens/
 ├── apps/
-│   └── dowry/                  # Tauri wrapper + SPA source
+│   └── tauri/                  # Tauri wrapper + SPA source
 ├── crates/
 │   ├── pagelens-core/          # Rust analysis engine
 │   └── pagelens-cli/           # Rust CLI
@@ -101,7 +101,7 @@ bun run test:integration        # Run integration tests
 
 ## Requirements
 
-- (optional) On Linux you need to have installed the [mold](https://github.com/rui314/mold) linker. If you prefer not to do that, go ahead and remove the rust flags in `/apps/dowry/src-tauri/.cargo/config.toml`.
+- (optional) On Linux you need to have installed the [mold](https://github.com/rui314/mold) linker. If you prefer not to do that, go ahead and remove the rust flags in `/apps/tauri/src-tauri/.cargo/config.toml`.
 
 ## License
 
