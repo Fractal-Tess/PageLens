@@ -4,6 +4,7 @@ pub mod prelude;
 pub mod repository;
 
 use crate::prelude::*;
+use pagelens_logging::{debug, info};
 use rusqlite::{params, Connection, OpenFlags};
 use std::path::Path;
 
@@ -25,6 +26,7 @@ impl Database {
     /// 4. Configure busy timeout for concurrent access
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
+        debug!(db_path = %path.display(), "Opening database");
 
         // Create parent directories if they don't exist
         if let Some(parent) = path.parent() {
@@ -40,6 +42,7 @@ impl Database {
         let db = Self { conn };
         db.configure()?;
         db.run_migrations()?;
+        debug!(db_path = %path.display(), "Database ready");
 
         Ok(db)
     }
@@ -97,6 +100,7 @@ impl Database {
 
         for (version, sql) in migrations {
             if !applied_versions.contains(&version) {
+                info!(migration_version = version, "Applying database migration");
                 tx.execute_batch(sql).map_err(|e| {
                     Error::Migration(format!("Migration {} failed: {}", version, e))
                 })?;

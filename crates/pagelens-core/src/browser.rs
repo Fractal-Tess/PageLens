@@ -1,6 +1,7 @@
 //! Browser management — Chromium download, launch, and lifecycle.
 
 use crate::prelude::*;
+use pagelens_logging::{debug, error, info, warn};
 use chromiumoxide::cdp::browser_protocol::network::{
     EnableParams, EventLoadingFailed, EventLoadingFinished, EventRequestWillBeSent,
     EventResponseReceived, Headers, SetExtraHttpHeadersParams,
@@ -113,6 +114,7 @@ impl Browser {
     pub async fn launch() -> Result<Self> {
         let locator = ChromiumLocator::new();
         let binary_path = locator.find()?;
+        info!(binary = %binary_path.display(), "Launching Chromium browser");
 
         // Create a unique temp directory for this browser instance's user data
         // This prevents "SingletonLock" conflicts when running multiple browsers
@@ -153,11 +155,11 @@ impl Browser {
                         let _ = msg;
                     }
                     Some(Err(e)) => {
-                        eprintln!("Browser handler error: {}", e);
+                        error!(error = %e, "Browser handler error");
                         break;
                     }
                     None => {
-                        eprintln!("Browser handler stream ended");
+                        warn!("Browser handler stream ended");
                         break;
                     }
                 }
@@ -209,6 +211,8 @@ impl Browser {
         {
             return Err(Error::InvalidUrl(url.to_string()));
         }
+
+        debug!(url = %url, has_headers = !headers.is_empty(), "Navigating page");
 
         let browser = self.get_browser()?;
         let collected_network_requests: Arc<
@@ -404,6 +408,7 @@ impl Browser {
 
     /// Internal shutdown method that doesn't consume self.
     async fn shutdown_internal(&mut self) -> Result<()> {
+        debug!("Shutting down browser instance");
         if let Some(browser) = self.browser.take() {
             let _ = browser.close().await;
         }

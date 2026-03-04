@@ -1,6 +1,7 @@
 //! CLI module for pagelens-cli
 
 use clap::{ArgAction, Parser};
+use pagelens_logging::{debug, info, warn};
 use std::collections::HashMap;
 
 mod analysis;
@@ -101,6 +102,7 @@ impl Cli {
         }
 
         let request_headers = parse_headers(&self.headers)?;
+        debug!(url = %url, header_count = request_headers.len(), "Validated CLI audit input");
 
         Ok((url.to_string(), request_headers))
     }
@@ -137,6 +139,16 @@ pub async fn run_audit(
         include_contrast,
         include_site_files,
     );
+    info!(
+        url = %url,
+        mode = ?effective_mode,
+        json_output,
+        include_assets = toggles.assets,
+        include_perf = toggles.perf,
+        include_contrast = toggles.contrast,
+        include_site_files = toggles.site_files,
+        "Running CLI audit"
+    );
 
     if !json_output {
         println!("🔍 PageLens Audit");
@@ -169,6 +181,7 @@ pub async fn run_audit(
             .await
             .map_err(|e| format!("Failed to navigate with headers: {e}"))?
     };
+    debug!(url = %url, "Navigation completed");
 
     // Capture snapshot
     if !json_output {
@@ -182,6 +195,13 @@ pub async fn run_audit(
         .snapshot(snapshot_options)
         .await
         .map_err(|e| format!("Failed to capture snapshot: {e}"))?;
+    debug!(
+        title = %snapshot.title,
+        js_assets = snapshot.referenced_assets.javascript.len(),
+        css_assets = snapshot.referenced_assets.stylesheets.len(),
+        media_assets = snapshot.referenced_assets.media.len(),
+        "Captured page snapshot"
+    );
 
     // Run SEO analysis
     let seo_report = SeoAnalyzer::analyze(&snapshot);
@@ -207,7 +227,10 @@ pub async fn run_audit(
     let (site_files_report, site_files_error) = if toggles.site_files {
         match SiteFilesAnalyzer::analyze(url).await {
             Ok(report) => (Some(report), None),
-            Err(err) => (None, Some(err.to_string())),
+            Err(err) => {
+                warn!(url = %url, error = %err, "Site files analysis failed");
+                (None, Some(err.to_string()))
+            }
         }
     } else {
         (None, None)
@@ -264,7 +287,8 @@ pub async fn run_audit(
         }
     }
 
-    // Shutdown browser
+    info!(url = %url, seo_score = seo_report.score, issue_count = seo_report.issues.len(), "CLI audit finished");
+
     browser.shutdown().await.ok();
 
     Ok(())

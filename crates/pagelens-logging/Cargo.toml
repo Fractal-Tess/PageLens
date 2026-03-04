@@ -1,0 +1,12 @@
+[package]
+name = "pagelens-logging"
+description = "Shared tracing/logging initialization for PageLens crates"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

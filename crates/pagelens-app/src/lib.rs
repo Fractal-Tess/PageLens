@@ -2,9 +2,11 @@ mod error;
 mod prelude;
 
 use pagelens_core::{
-    Browser, CrawlOptions, Crawler, HttpBenchmarkOptions, HttpBenchmarker, SeoAnalyzer, SeoReport,
-    Snapshot, SnapshotExt, SnapshotOptions,
+    Browser, CrawlOptions, Crawler, HttpBenchmarkLatencyStats, HttpBenchmarkOptions,
+    HttpBenchmarkResult, HttpBenchmarker, SeoAnalyzer, SeoReport, Snapshot, SnapshotExt,
+    SnapshotOptions,
 };
+use pagelens_logging::{error, info, warn};
 use pagelens_db::{
     AnalysisAsset, AnalysisPageResult, AnalysisRun, AnalysisRunStatus, AnalysisSummary,
     AnalysisType, CreateAnalysisAsset, CreateAnalysisPageResult, CreateAnalysisRun, Database,
@@ -12,7 +14,7 @@ use pagelens_db::{
 };
 use prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -455,6 +457,7 @@ impl AppService {
             .unwrap_or_else(|| Path::new("."))
             .join("assets");
         Database::open(&db_path)?;
+        info!(db_path = %db_path.display(), assets_dir = %assets_base_dir.display(), "Initialized AppService");
         Ok(Self {
             db_path,
             assets_base_dir,
@@ -478,6 +481,7 @@ impl AppService {
             .run_id
             .clone()
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        info!(run_id = %run_id, url = %input.url, mode = ?analysis_mode, "Starting analysis run");
 
         {
             let db = Database::open(&self.db_path)?;
@@ -528,6 +532,7 @@ impl AppService {
                 }
             };
             if let Err(err) = result {
+                error!(run_id = %run_id_for_task, error = %err, "Run execution failed");
                 let _ = service
                     .mark_run_failed(&run_id_for_task, err.to_string())
                     .await;
@@ -591,10 +596,12 @@ impl AppService {
             run.status,
             AnalysisRunStatus::Running | AnalysisRunStatus::Pending
         ) {
+            warn!(run_id = %run_id, status = ?run.status, "Cancel requested for non-active run");
             return Err(Error::Message("Run is not active".to_string()));
         }
 
         let cancel_message = "Analysis cancelled by user".to_string();
+        info!(run_id = %run_id, analysis_type = ?run.analysis_type, "Cancelling run");
 
         if run.analysis_type == AnalysisType::HttpBenchmark {
             {
@@ -693,6 +700,7 @@ impl AppService {
     }
 
     async fn mark_run_failed(&self, run_id: &str, message: String) -> Result<()> {
+        error!(run_id = %run_id, error_message = %message, "Marking run as failed");
         let db = Database::open(&self.db_path)?;
         let repo = db.analysis_repository();
         let updated = repo.update_run_state_if_active(
@@ -730,6 +738,7 @@ impl AppService {
         input: AnalyseUrlInput,
         tx: broadcast::Sender<RunEvent>,
     ) -> Result<()> {
+        info!(run_id = %run_id, url = %input.url, "Executing single analysis");
         let start = Instant::now();
 
         {
@@ -826,6 +835,7 @@ impl AppService {
         }
 
         let _ = tx.send(RunEvent::completed(&run_id));
+        info!(run_id = %run_id, duration_ms = start.elapsed().as_millis() as u64, "Single analysis completed");
 
         // Fire-and-forget asset download (does not block completion event)
         let db_path = self.db_path.clone();
@@ -851,6 +861,7 @@ impl AppService {
         input: AnalyseUrlInput,
         tx: broadcast::Sender<RunEvent>,
     ) -> Result<()> {
+        info!(run_id = %run_id, seed_url = %input.url, "Executing crawl analysis");
         let start = Instant::now();
 
         {
@@ -1047,6 +1058,14 @@ impl AppService {
             crawl_result.stats.failed_pages as u32,
         ));
 
+        info!(
+            run_id = %run_id,
+            duration_ms = start.elapsed().as_millis() as u64,
+            crawled_pages = crawl_result.stats.crawled_pages,
+            failed_pages = crawl_result.stats.failed_pages,
+            "Crawl analysis completed"
+        );
+
         Ok(())
     }
 
@@ -1056,6 +1075,7 @@ impl AppService {
         input: AnalyseUrlInput,
         tx: broadcast::Sender<RunEvent>,
     ) -> Result<()> {
+        info!(run_id = %run_id, url = %input.url, "Executing HTTP benchmark analysis");
         let start = Instant::now();
 
         {
@@ -1091,6 +1111,7 @@ impl AppService {
         if benchmark_input.duration_secs.unwrap_or(0.0) <= 0.0 {
             benchmark_input.duration_secs = Some(10.0);
         }
+        let benchmark_url = input.url.clone();
         let benchmark_options: HttpBenchmarkOptions = benchmark_input.into();
         let benchmarker = HttpBenchmarker::new(&benchmark_options)?;
 
@@ -1105,6 +1126,7 @@ impl AppService {
         let db_path = self.db_path.clone();
         let run_id_for_progress = run_id.clone();
         let tx_for_progress = tx.clone();
+        let benchmark_url_for_live = benchmark_url.clone();
         let benchmark_start = Instant::now();
         let duration_target_secs = benchmark_options.duration_secs.filter(|&d| d > 0.0);
         // Initialise far in the past so the very first event is always emitted.
@@ -1115,10 +1137,15 @@ impl AppService {
         let mut live_latencies: Vec<f64> = Vec::new();
         let mut live_total_data_bytes: u64 = 0;
         let mut live_sized_response_count: usize = 0;
+        let mut live_status_code_distribution: BTreeMap<String, usize> = BTreeMap::new();
+        let mut live_error_distribution: BTreeMap<String, usize> = BTreeMap::new();
+        let mut last_payload_persist_at = benchmark_start
+            .checked_sub(Duration::from_secs(1))
+            .unwrap_or(benchmark_start);
 
         let result = benchmarker
             .benchmark_with_callback(
-                &input.url,
+                &benchmark_url,
                 benchmark_options.clone(),
                 Arc::clone(&cancel_flag),
                 move |successful, failed, total, latest_sample| {
@@ -1127,10 +1154,35 @@ impl AppService {
                     let pos = live_latencies.partition_point(|&x| x < latency_ms);
                     live_latencies.insert(pos, latency_ms);
                     if latest_sample.success {
+                        if let Some(code) = latest_sample.status_code {
+                            *live_status_code_distribution
+                                .entry(code.to_string())
+                                .or_insert(0) += 1;
+                        }
                         if let Some(bytes) = latest_sample.response_size_bytes {
                             live_total_data_bytes = live_total_data_bytes.saturating_add(bytes);
                             live_sized_response_count += 1;
                         }
+                    } else if let Some(err) = latest_sample.error.as_ref() {
+                        let normalized = if err.contains("timed out") || err.contains("timeout") {
+                            "timeout".to_string()
+                        } else if err.contains("connection refused") {
+                            "connection refused".to_string()
+                        } else if err.contains("connection reset") {
+                            "connection reset".to_string()
+                        } else if err.to_lowercase().contains("dns") {
+                            "dns error".to_string()
+                        } else if err.contains("certificate")
+                            || err.contains("tls")
+                            || err.contains("ssl")
+                        {
+                            "tls/certificate error".to_string()
+                        } else if err.to_lowercase().contains("redirect") {
+                            "redirection limit reached".to_string()
+                        } else {
+                            err.chars().take(60).collect()
+                        };
+                        *live_error_distribution.entry(normalized).or_insert(0) += 1;
                     }
 
                     let now = Instant::now();
@@ -1211,14 +1263,76 @@ impl AppService {
                     };
 
                     if let Ok(db) = Database::open(&db_path) {
-                        let updated =
+                        let success_rate = if done == 0 {
+                            0.0
+                        } else {
+                            successful as f64 / done as f64
+                        };
+                        let live_payload = HttpBenchmarkResult {
+                            url: benchmark_url_for_live.clone(),
+                            method: benchmark_options.method.clone(),
+                            requests: done,
+                            connections: benchmark_options.connections,
+                            duration_ms: (elapsed_secs * 1000.0) as u64,
+                            requests_per_sec: live_rps,
+                            successful_requests: successful,
+                            failed_requests: failed,
+                            success_rate,
+                            status_code_distribution: live_status_code_distribution.clone(),
+                            error_distribution: live_error_distribution.clone(),
+                            latency: HttpBenchmarkLatencyStats {
+                                min_ms: lat_min,
+                                max_ms: lat_max,
+                                avg_ms: lat_avg,
+                                p10_ms: lat_p10,
+                                p25_ms: lat_p25,
+                                p50_ms: lat_p50,
+                                p75_ms: lat_p75,
+                                p90_ms: lat_p90,
+                                p95_ms: lat_p95,
+                                p99_ms: lat_p99,
+                                p99_9_ms: lat_p99_9,
+                            },
+                            latency_histogram: hist.clone(),
+                            samples: Vec::new(),
+                            total_data_bytes: live_total_data_bytes,
+                            avg_size_per_request_bytes: live_avg_size_per_request_bytes,
+                            data_per_sec_bytes: live_data_per_sec_bytes,
+                            is_duration_mode: total == 0,
+                            target_duration_secs: duration_target_secs,
+                        };
+                        let summary = AnalysisSummary {
+                            seo_score: None,
+                            page_count: done as u32,
+                            total_issues: failed as u32,
+                            error_count: failed as u32,
+                            warning_count: 0,
+                            duration_ms: (elapsed_secs * 1000.0) as u32,
+                        };
+
+                        let persist_live = now.duration_since(last_payload_persist_at).as_millis() >= 250;
+
+                        let updated = if persist_live {
+                            last_payload_persist_at = now;
+                            let payload_json = serde_json::to_string(&live_payload)
+                                .unwrap_or_else(|_| "{}".to_string());
+                            db.analysis_repository().update_benchmark_live_snapshot_if_active(
+                                &run_id_for_progress,
+                                &payload_json,
+                                &summary,
+                                Some("benchmark"),
+                                Some(&message),
+                                Some(progress),
+                            )
+                        } else {
                             db.analysis_repository().update_run_state_if_active(
                                 &run_id_for_progress,
                                 AnalysisRunStatus::Running,
                                 Some("benchmark"),
                                 Some(&message),
                                 Some(progress),
-                            );
+                            )
+                        };
                         if !matches!(updated, Ok(true)) {
                             return;
                         }
@@ -1298,6 +1412,13 @@ impl AppService {
         }
 
         if cancelled_by_user {
+            info!(
+                run_id = %run_id,
+                requests = result.requests,
+                successful_requests = result.successful_requests,
+                failed_requests = result.failed_requests,
+                "HTTP benchmark cancelled; persisting partial results"
+            );
             let _ = tx.send(RunEvent::cancelled(
                 &run_id,
                 "Analysis cancelled by user. Showing partial benchmark results.".to_string(),
@@ -1309,6 +1430,14 @@ impl AppService {
                 result.successful_requests as u32,
                 result.failed_requests as u32,
             ));
+            info!(
+                run_id = %run_id,
+                duration_ms = start.elapsed().as_millis() as u64,
+                requests = result.requests,
+                successful_requests = result.successful_requests,
+                failed_requests = result.failed_requests,
+                "HTTP benchmark completed"
+            );
         }
 
         Ok(())

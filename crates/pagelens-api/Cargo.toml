@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 axum = { workspace = true }
 pagelens-app = { workspace = true }
+pagelens-logging = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

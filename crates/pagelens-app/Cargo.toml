@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 pagelens-core = { workspace = true }
 pagelens-db = { workspace = true }
+pagelens-logging = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

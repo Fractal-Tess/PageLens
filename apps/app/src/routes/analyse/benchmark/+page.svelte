@@ -132,15 +132,15 @@
 					<p class="mb-6 text-xs text-muted-foreground">
 						The URL that receives all benchmark requests.
 					</p>
-					<div class="flex gap-0">
+					<div class="flex flex-col gap-3 md:flex-row md:gap-0">
 						<Input
 							bind:value={url}
 							type="url"
 							placeholder="https://api.example.com/endpoint"
 							required
-							class="h-14 flex-1 border border-r-0 border-border bg-transparent px-4 font-mono text-sm focus-visible:ring-0 focus-visible:border-primary rounded-none placeholder:text-muted-foreground/30"
+							class="h-14 flex-1 border border-border bg-transparent px-4 font-mono text-sm focus-visible:ring-0 focus-visible:border-primary rounded-none placeholder:text-muted-foreground/30 md:border-r-0"
 						/>
-						<div class="flex h-14 items-center border border-l-0 border-border bg-secondary px-4">
+						<div class="flex h-14 items-center border border-border bg-secondary px-4 md:border-l-0">
 							<select
 								bind:value={method}
 								class="bg-transparent text-xs font-bold tracking-widest uppercase text-foreground focus:outline-none cursor-pointer"
@@ -150,6 +150,13 @@
 								{/each}
 							</select>
 						</div>
+						<Button
+							type="submit"
+							disabled={!isValidUrl(url)}
+							class="h-14 rounded-none border border-primary bg-primary px-8 text-xs font-bold tracking-widest uppercase text-primary-foreground hover:bg-primary/90 disabled:opacity-40 md:border-l-0"
+						>
+							BENCHMARK URL →
+						</Button>
 					</div>
 				</div>
 
@@ -234,19 +241,6 @@
 					</div>
 				</div>
 
-				<!-- Submit -->
-				<div class="border-t border-border px-8 py-5 flex items-center justify-between gap-4">
-					<div class="text-[10px] text-muted-foreground/60">
-						Stats appear live as requests complete.
-					</div>
-					<Button
-						type="submit"
-						disabled={!isValidUrl(url)}
-						class="h-12 rounded-none border border-primary bg-primary px-10 text-xs font-bold tracking-widest uppercase text-primary-foreground hover:bg-primary/90 disabled:opacity-40 shrink-0"
-					>
-						BENCHMARK URL →
-					</Button>
-				</div>
 			</div>
 
 			{#if formError}

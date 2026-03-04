@@ -9,8 +9,7 @@
 		isHttpBenchmarkRunPayload,
 		parseRunPayload,
 		subscribeToEvents,
-		startAnalysis,
-		updateRun
+		startAnalysis
 	} from '$lib/api';
 	import type { AnalysisRun, AnalysisPageResult, RunEvent, RunPayload } from '$lib/api';
 
@@ -107,34 +106,6 @@
 		}
 	}
 
-	// Label editing
-	let editingLabel = $state(false);
-	let labelDraft = $state('');
-	let labelSaving = $state(false);
-
-	function startEditLabel() {
-		labelDraft = run?.name ?? '';
-		editingLabel = true;
-	}
-
-	async function saveLabel() {
-		if (!run) return;
-		labelSaving = true;
-		try {
-			const updated = await updateRun(runId, labelDraft.trim() || null);
-			run = { ...run, name: updated.name };
-			editingLabel = false;
-		} catch {
-			/* ignore — keep editing state open */
-		} finally {
-			labelSaving = false;
-		}
-	}
-
-	function cancelEditLabel() {
-		editingLabel = false;
-	}
-
 	function updateLiveStatsFromPages() {
 		const success = pages.filter((entry) => entry.success).length;
 		const failed = pages.length - success;
@@ -164,6 +135,39 @@
 			}
 			run = nextRun;
 			runPayload = run.payload_json ? parseRunPayload(run.payload_json) : null;
+			if (run.analysis_type === 'http_benchmark' && runPayload && isHttpBenchmarkRunPayload(runPayload)) {
+				benchmarkLive = {
+					...benchmarkLive,
+					method: runPayload.method,
+					connections: runPayload.connections,
+					targetDurationSecs: runPayload.target_duration_secs ?? benchmarkLive.targetDurationSecs,
+					elapsedMs: runPayload.duration_ms,
+					successful: runPayload.successful_requests,
+					failed: runPayload.failed_requests,
+					requestsPerSec: runPayload.requests_per_sec,
+					successRate:
+						runPayload.success_rate != null
+							? runPayload.success_rate * 100
+							: runPayload.requests > 0
+								? (runPayload.successful_requests / runPayload.requests) * 100
+								: 0,
+					latencyMinMs: runPayload.latency.min_ms,
+					latencyAvgMs: runPayload.latency.avg_ms,
+					latencyP95Ms: runPayload.latency.p95_ms,
+					latencyMaxMs: runPayload.latency.max_ms,
+					totalDataBytes: runPayload.total_data_bytes ?? 0,
+					avgSizePerRequestBytes: runPayload.avg_size_per_request_bytes ?? 0,
+					dataPerSecBytes: runPayload.data_per_sec_bytes ?? 0,
+					histogram: runPayload.latency_histogram,
+					p10: runPayload.latency.p10_ms ?? 0,
+					p25: runPayload.latency.p25_ms ?? 0,
+					p50: runPayload.latency.p50_ms,
+					p75: runPayload.latency.p75_ms ?? 0,
+					p90: runPayload.latency.p90_ms ?? 0,
+					p99: runPayload.latency.p99_ms,
+					p99_9: runPayload.latency.p99_9_ms ?? 0
+				};
+			}
 			if (run.analysis_type === 'http_benchmark' && benchmarkLiveStartedAt == null) {
 				const startedAtMs = run.created_at ? Date.parse(run.created_at) : Number.NaN;
 				if (Number.isFinite(startedAtMs)) {
@@ -284,8 +288,11 @@
 								...run,
 								status: 'failed',
 								current_stage: 'cancelled',
-								current_message: event.message ?? run.current_message,
-								progress: event.progress ?? run.progress
+								current_message:
+									event.message ??
+									run.current_message ??
+									'Analysis was interrupted by user before completion.',
+								progress: 1.0
 							};
 						} else {
 							run = {
@@ -329,6 +336,9 @@
 			await cancelRun(runId);
 			closeEventStream();
 			await refreshRunData();
+			if (run && (run.status === 'running' || run.status === 'pending')) {
+				connectSSE(runId, loadVersion);
+			}
 		} catch {
 			/* ignore */
 		} finally {
@@ -364,26 +374,47 @@
 		closeEventStream();
 	});
 
+	function isInterruptedByUser(r?: AnalysisRun | null) {
+		if (!r || r.status !== 'failed') return false;
+		if (r.current_stage === 'cancelled') return true;
+		const message = r.current_message?.toLowerCase() ?? '';
+		return (
+			message.includes('cancelled by user') ||
+			message.includes('canceled by user') ||
+			message.includes('interrupted by user')
+		);
+	}
+
 	function isCancelledRun(r?: AnalysisRun | null) {
-		return r?.status === 'failed' && r.current_stage === 'cancelled';
+		return isInterruptedByUser(r);
+	}
+
+	function isCancelPending(r?: AnalysisRun | null) {
+		if (!r) return false;
+		if (r.current_stage === 'cancelling') return true;
+		const message = r.current_message?.toLowerCase() ?? '';
+		return message.includes('stopping benchmark') || message.includes('cancelling');
 	}
 
 	function statusLabel(r?: AnalysisRun | null) {
 		if (!r?.status) return 'LOADING';
-		if (isCancelledRun(r)) return 'CANCELLED';
+		if (isCancelPending(r)) return 'CANCELED';
+		if (isCancelledRun(r)) return 'CANCELED';
 		return r.status.toUpperCase();
 	}
 
 	function statusClass(r?: AnalysisRun | null) {
 		if (r?.status === 'completed') return 'border-green-700 text-green-400';
+		if (isCancelPending(r)) return 'border-yellow-600/70 text-yellow-400';
 		if (isCancelledRun(r)) return 'border-yellow-600/70 text-yellow-400';
 		if (r?.status === 'failed') return 'border-destructive/60 text-destructive';
 		return 'border-primary/60 text-primary';
 	}
 
-	function fmtDate(s?: string) {
-		if (!s) return '—';
-		return new Date(s).toLocaleString();
+	function effectiveProgress(r?: AnalysisRun | null) {
+		if (!r) return null;
+		if (isCancelledRun(r) || r.status === 'completed') return 1;
+		return r.progress ?? null;
 	}
 
 	function scoreColor(score: number | null) {
@@ -502,6 +533,12 @@
 			{ label: 'p99.9', value: benchmarkLive.p99_9 }
 		].filter((p) => p.value > 0)
 	);
+
+	const runMethod = $derived(
+		run?.analysis_type === 'http_benchmark'
+			? benchmarkPayload?.method ?? benchmarkLive.method ?? 'GET'
+			: null
+	);
 </script>
 
 <svelte:head>
@@ -510,96 +547,75 @@
 
 <div class="mx-auto max-w-6xl px-6 py-10">
 	<!-- Run header -->
-	<div class="mb-8 border border-border p-6">
-		<div class="mb-4 flex items-start justify-between gap-4">
-			<div class="min-w-0">
-				<div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">Run ID</div>
-				<div class="font-mono text-xs text-muted-foreground break-all">{runId}</div>
+	<div class="mb-8 border border-border bg-background">
+		<div class="grid gap-px bg-border lg:grid-cols-[1fr_auto]">
+			<div class="bg-background p-6 md:p-7">
+				<div class="mb-3 text-[10px] tracking-[0.35em] text-muted-foreground uppercase">Run overview</div>
+				<div class="mb-4 break-all font-mono text-sm leading-relaxed text-foreground/95">{run?.url ?? 'Loading URL…'}</div>
+				<div class="flex flex-wrap items-center gap-2">
+					<div class="border border-border bg-secondary/40 px-2.5 py-1 text-[10px] font-bold tracking-widest uppercase text-muted-foreground">
+						{run?.analysis_type ?? '—'}
+					</div>
+					{#if runMethod}
+						<div class="border border-primary/50 bg-primary/10 px-2.5 py-1 font-mono text-[10px] font-bold tracking-widest uppercase text-primary">
+							{runMethod}
+						</div>
+					{/if}
+					<div class="border border-border px-2.5 py-1 font-mono text-[10px] font-bold tracking-widest uppercase text-foreground/80">
+						{effectiveProgress(run) != null
+							? Math.round((effectiveProgress(run) ?? 0) * 100) + '%'
+							: '—'} complete
+					</div>
+				</div>
 			</div>
-			<div class="flex items-center gap-2">
-				{#if run}
-					<button
-						type="button"
-						onclick={rerunCurrentRun}
-						disabled={rerunningRun}
-						class="border border-primary/60 px-3 py-1 text-xs font-bold tracking-widest uppercase text-primary transition-colors hover:bg-primary/10 disabled:opacity-40"
-					>
-						{rerunningRun ? 'RE-RUNNING…' : 'RE-RUN'}
-					</button>
-				{/if}
-				{#if run && (run.status === 'running' || run.status === 'pending')}
-					<button
-						type="button"
-						onclick={stopRun}
-						disabled={cancelling}
-						class="border border-destructive/60 px-3 py-1 text-xs font-bold tracking-widest uppercase text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-40"
-					>
-						{cancelling ? 'CANCELLING…' : 'CANCEL RUN'}
-					</button>
-				{/if}
-				<div
-					class="shrink-0 border px-3 py-1 text-xs font-bold tracking-widest uppercase {statusClass(run)}"
-				>
-					{statusLabel(run)}
+
+			<div class="bg-background p-6 md:p-7 lg:min-w-[272px]">
+				<div class="flex flex-wrap items-center justify-end gap-2">
+					{#if run}
+						<button
+							type="button"
+							onclick={rerunCurrentRun}
+							disabled={rerunningRun}
+							class="h-9 border border-primary/60 px-3 text-xs font-bold tracking-widest uppercase text-primary transition-colors hover:bg-primary/10 disabled:opacity-40"
+						>
+							{rerunningRun ? 'RE-RUNNING…' : 'RE-RUN'}
+						</button>
+					{/if}
+					{#if run && (run.status === 'running' || run.status === 'pending') && !isCancelPending(run) && !isCancelledRun(run)}
+						<button
+							type="button"
+							onclick={stopRun}
+							disabled={cancelling}
+							class="h-9 border border-destructive/60 px-3 text-xs font-bold tracking-widest uppercase text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-40"
+						>
+							{cancelling ? 'CANCELLING…' : 'CANCEL RUN'}
+						</button>
+					{/if}
+					<div class="h-9 border px-3 inline-flex items-center text-xs font-bold tracking-widest uppercase {statusClass(run)}">
+						{statusLabel(run)}
+					</div>
 				</div>
 			</div>
 		</div>
 
 		{#if run}
+			{#if isCancelledRun(run)}
+				<div class="mb-4 border border-yellow-500/50 bg-yellow-500/10 px-4 py-2 text-[10px] tracking-widest text-yellow-300 uppercase">
+					Run canceled by user before completion. Showing finalized partial results.
+				</div>
+			{/if}
 			<div class="grid grid-cols-2 gap-px bg-border md:grid-cols-4">
 				<div class="bg-background p-4">
 					<div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">URL</div>
 					<div class="truncate font-mono text-xs">{run.url}</div>
 				</div>
 				<div class="bg-background p-4">
-					<div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">Label</div>
-					{#if editingLabel}
-						<form
-							onsubmit={(e) => { e.preventDefault(); saveLabel(); }}
-							class="flex items-center gap-1"
-						>
-							<input
-								bind:value={labelDraft}
-								disabled={labelSaving}
-								placeholder="Add label..."
-								autofocus
-								class="min-w-0 flex-1 border border-primary bg-transparent px-2 py-0.5 font-mono text-xs outline-none placeholder:text-muted-foreground/40"
-							/>
-							<button
-								type="submit"
-								disabled={labelSaving}
-								class="shrink-0 border border-primary px-2 py-0.5 text-xs text-primary hover:bg-primary hover:text-primary-foreground transition-colors disabled:opacity-40"
-							>
-								{labelSaving ? '…' : 'OK'}
-							</button>
-							<button
-								type="button"
-								onclick={cancelEditLabel}
-								disabled={labelSaving}
-								class="shrink-0 px-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-							>
-								✕
-							</button>
-						</form>
-					{:else}
-						<button
-							onclick={startEditLabel}
-							class="group flex items-center gap-1.5 font-mono text-xs hover:text-primary transition-colors"
-						>
-							<span>{run.name ?? '—'}</span>
-							<span class="text-muted-foreground/40 group-hover:text-primary transition-colors">✎</span>
-						</button>
-					{/if}
+					<div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">Method</div>
+					<div class="font-mono text-xs">{runMethod ?? '—'}</div>
 				</div>
 				<div class="bg-background p-4">
-					<div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">Started</div>
-					<div class="font-mono text-xs">{fmtDate(run.created_at)}</div>
-				</div>
-				<div class="bg-background p-4">
-					<div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">Progress</div>
-					<div class="font-mono text-xs">
-						{run.progress != null ? Math.round(run.progress * 100) + '%' : '—'}
-					</div>
+					<div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">Status</div>
+					<div class="font-mono text-xs uppercase">{statusLabel(run)}</div>
 				</div>
 				{#if run.analysis_type === 'crawl'}
 					<div class="bg-background p-4">
@@ -625,7 +641,7 @@
 				<div class="mt-4 h-px w-full bg-border">
 					<div
 						class="h-px bg-primary transition-all duration-500"
-						style="width: {run.progress != null ? Math.round(run.progress * 100) : 0}%"
+						style="width: {effectiveProgress(run) != null ? Math.round((effectiveProgress(run) ?? 0) * 100) : 0}%"
 					></div>
 				</div>
 			{/if}
@@ -678,7 +694,7 @@
 	{/if}
 
 	{#if run?.analysis_type === 'http_benchmark'}
-		{#if run.status === 'running' || run.status === 'pending'}
+		{#if (run.status === 'running' || run.status === 'pending') && !(benchmarkPayload && (done || isCancelledRun(run)))}
 			<div class="mb-8 border border-border font-mono text-xs">
 				<div class="border-b border-border bg-secondary/30 px-6 py-3">
 					<div class="mb-2 flex items-center gap-3">
@@ -785,7 +801,7 @@
 			</div>
 		{/if}
 
-		{#if benchmarkPayload && done}
+		{#if benchmarkPayload && (done || isCancelledRun(run))}
 			<div class="mb-8 border border-border font-mono text-xs">
 				<!-- Config bar -->
 				<div class="border-b border-border bg-secondary/30 px-6 py-3">

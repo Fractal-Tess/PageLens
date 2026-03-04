@@ -5,6 +5,7 @@ use crate::models::{
 };
 use crate::prelude::*;
 use chrono::{DateTime, Utc};
+use pagelens_logging::{debug, info, warn};
 use rusqlite::{params, Connection, Row};
 
 /// Repository for analysis run operations.
@@ -57,6 +58,8 @@ impl<'a> AnalysisRepository<'a> {
                 input.progress,
             ],
         )?;
+
+        info!(run_id = %id, analysis_type = %analysis_type_str, status = %status_str, "Created analysis run");
 
         Ok(AnalysisRun {
             id,
@@ -202,12 +205,66 @@ impl<'a> AnalysisRepository<'a> {
         )?;
 
         if updated > 0 {
+            debug!(run_id = %id, status = %status_to_str(status), stage = ?current_stage, progress = ?progress, "Updated active run state");
             return Ok(true);
         }
 
         if !self.run_exists(id)? {
             return Err(Error::AnalysisRunNotFound { id: id.to_string() });
         }
+
+        warn!(run_id = %id, "Skipped state update because run is no longer active");
+
+        Ok(false)
+    }
+
+    pub fn update_benchmark_live_snapshot_if_active(
+        &self,
+        id: &str,
+        payload_json: &str,
+        summary: &AnalysisSummary,
+        current_stage: Option<&str>,
+        current_message: Option<&str>,
+        progress: Option<f64>,
+    ) -> Result<bool> {
+        let updated = self.conn.execute(
+            "UPDATE analysis_runs
+             SET payload = ?1,
+                 seo_score = ?2,
+                 page_count = ?3,
+                 total_issues = ?4,
+                 error_count = ?5,
+                 warning_count = ?6,
+                 duration_ms = ?7,
+                 current_stage = ?8,
+                 current_message = ?9,
+                 progress = ?10
+             WHERE id = ?11 AND status IN ('pending', 'running')",
+            params![
+                payload_json,
+                summary.seo_score,
+                summary.page_count as i64,
+                summary.total_issues as i64,
+                summary.error_count as i64,
+                summary.warning_count as i64,
+                summary.duration_ms as i64,
+                current_stage,
+                current_message,
+                progress,
+                id,
+            ],
+        )?;
+
+        if updated > 0 {
+            debug!(run_id = %id, progress = ?progress, "Persisted live benchmark snapshot");
+            return Ok(true);
+        }
+
+        if !self.run_exists(id)? {
+            return Err(Error::AnalysisRunNotFound { id: id.to_string() });
+        }
+
+        warn!(run_id = %id, "Skipped benchmark snapshot persistence because run is no longer active");
 
         Ok(false)
     }
@@ -284,12 +341,15 @@ impl<'a> AnalysisRepository<'a> {
         )?;
 
         if updated > 0 {
+            info!(run_id = %id, "Completed analysis run");
             return Ok(true);
         }
 
         if !self.run_exists(id)? {
             return Err(Error::AnalysisRunNotFound { id: id.to_string() });
         }
+
+        warn!(run_id = %id, "Skipped completion because run is no longer active");
 
         Ok(false)
     }
@@ -329,12 +389,15 @@ impl<'a> AnalysisRepository<'a> {
         )?;
 
         if updated > 0 {
+            info!(run_id = %id, "Completed analysis run as cancelled with partial results");
             return Ok(true);
         }
 
         if !self.run_exists(id)? {
             return Err(Error::AnalysisRunNotFound { id: id.to_string() });
         }
+
+        warn!(run_id = %id, "Skipped cancelled-completion because run is no longer active");
 
         Ok(false)
     }
@@ -366,6 +429,8 @@ impl<'a> AnalysisRepository<'a> {
                 analyzed_at.to_rfc3339(),
             ],
         )?;
+
+        debug!(run_id = %input.run_id, page_url = %input.url, success = input.success, "Inserted page result");
 
         Ok(AnalysisPageResult {
             id,
@@ -439,6 +504,8 @@ impl<'a> AnalysisRepository<'a> {
                 created_at.to_rfc3339(),
             ],
         )?;
+
+        debug!(run_id = %input.run_id, asset_type = %input.asset_type, local_path = %input.local_path, "Inserted run asset");
 
         Ok(AnalysisAsset {
             id,

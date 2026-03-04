@@ -5,6 +5,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use pagelens_app::{AnalyseUrlInput, AppService, EditRunInput};
+use pagelens_logging::{error, info, warn};
 use serde::Deserialize;
 use std::convert::Infallible;
 use std::net::{IpAddr, SocketAddr};
@@ -35,10 +36,12 @@ struct HistoryQuery {
 }
 
 pub async fn serve(config: ApiConfig) -> Result<(), String> {
+    pagelens_logging::init("pagelens-api");
     let service = service_from_db_path(config.db_path)?;
     let app = router(service);
 
     let addr = SocketAddr::new(config.host, config.port);
+    info!(address = %addr, "Starting API server");
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .map_err(|e| e.to_string())?;
@@ -81,6 +84,7 @@ async fn start_analyse(
     State(state): State<ApiState>,
     Json(input): Json<AnalyseUrlInput>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    info!(url = %input.url, analysis_type = ?input.analysis_type, "Received analysis start request");
     let started = state
         .service
         .start_analyse(input)
@@ -113,6 +117,7 @@ async fn cancel_run(
     State(state): State<ApiState>,
     Path(run_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    info!(run_id = %run_id, "Received cancel request");
     state
         .service
         .cancel_run(&run_id)
@@ -167,6 +172,7 @@ async fn run_events(
     Path(run_id): Path<String>,
 ) -> Result<Response, ApiError> {
     if let Some(rx) = state.service.subscribe(&run_id).await {
+        info!(run_id = %run_id, "Opening SSE stream for active run");
         let stream = BroadcastStream::new(rx).filter_map(|result| match result {
             Ok(event) => serde_json::to_string(&event)
                 .ok()
@@ -182,6 +188,7 @@ async fn run_events(
 
     match state.service.terminal_event_for_run(&run_id) {
         Ok(Some(event)) => {
+            info!(run_id = %run_id, event_kind = %event.kind, "Serving terminal SSE event");
             let data = serde_json::to_string(&event).map_err(ApiError::internal)?;
             let one = tokio_stream::once(Ok::<Event, Infallible>(
                 Event::default().event(event.kind).data(data),
@@ -192,8 +199,14 @@ async fn run_events(
                     .into_response(),
             )
         }
-        Ok(None) => Err(ApiError::not_found("Run not found")),
-        Err(err) => Err(ApiError::from_app(err)),
+        Ok(None) => {
+            warn!(run_id = %run_id, "SSE requested for unknown run");
+            Err(ApiError::not_found("Run not found"))
+        }
+        Err(err) => {
+            error!(run_id = %run_id, error = %err, "Failed to resolve terminal SSE event");
+            Err(ApiError::from_app(err))
+        }
     }
 }
 

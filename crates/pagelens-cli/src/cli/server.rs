@@ -2,6 +2,10 @@
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
+#[cfg(not(debug_assertions))]
+use std::net::SocketAddr;
+
+use pagelens_logging::{info, warn};
 
 #[cfg(not(debug_assertions))]
 use axum::http::header;
@@ -26,12 +30,15 @@ pub fn open_browser_for_server(host: IpAddr, port: u16) {
         host
     };
     let url = format!("http://{}:{}/", open_host, port);
+    info!(url = %url, "Attempting to open browser for server mode");
     if let Err(err) = webbrowser::open(&url) {
+        warn!(url = %url, error = %err, "Failed to open browser automatically");
         eprintln!("Warning: failed to open browser automatically: {err}");
     }
 }
 
 pub async fn run_server(host: IpAddr, port: u16, db_path: PathBuf) -> Result<(), String> {
+    info!(host = %host, port, db_path = %db_path.display(), "Running server mode");
     #[cfg(debug_assertions)]
     {
         let config = pagelens_api::ApiConfig {
