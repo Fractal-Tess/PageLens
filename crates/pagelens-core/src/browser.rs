@@ -516,7 +516,7 @@ impl Page {
 }
 
 /// Simple URL decoding for data URLs.
-fn url_decode(input: &str) -> String {
+pub fn url_decode(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
 
@@ -543,16 +543,4 @@ fn url_decode(input: &str) -> String {
     }
 
     result
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_url_decode() {
-        assert_eq!(url_decode("hello%20world"), "hello world");
-        assert_eq!(url_decode("foo+bar"), "foo bar");
-        assert_eq!(url_decode("test%3C%3E"), "test<>");
-    }
 }

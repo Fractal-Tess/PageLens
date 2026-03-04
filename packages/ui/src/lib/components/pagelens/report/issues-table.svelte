@@ -1,46 +1,31 @@
 <script lang="ts">
-  import type { Issue } from '$lib/types'
-  import { Badge } from '@pagelens/ui/shadcn/badge'
   import {
     Table,
     TableBody,
     TableCell,
     TableHead,
     TableHeader,
-    TableRow
-  } from '@pagelens/ui/shadcn/table'
-
-  let { issues }: { issues: Issue[] } = $props()
-
-  function severityVariant(
-    severity: string
-  ): 'destructive' | 'default' | 'secondary' | 'outline' {
-    switch (severity) {
-      case 'Error':
-        return 'destructive'
-      case 'Warning':
-        return 'default'
-      default:
-        return 'secondary'
-    }
+    TableRow,
+  } from '../../ui/table';
+  import { Badge } from '../../ui/badge';
+  import type { Issue } from './types';
+  import { getSeverityVariant, getSeverityClass } from '../../../stores/report.svelte';
+  
+  interface Props {
+    issues: Issue[];
+    emptyMessage?: string;
+    class?: string;
   }
-
-  function severityClass(severity: string): string {
-    switch (severity) {
-      case 'Warning':
-        return 'bg-amber-500 hover:bg-amber-500/80'
-      default:
-        return ''
-    }
-  }
+  
+  let { issues, emptyMessage = 'No issues found', class: className = '' }: Props = $props();
 </script>
 
 {#if issues.length === 0}
   <div class="flex flex-col items-center py-8 text-center text-muted-foreground">
-    <p class="text-sm">No issues found</p>
+    <p class="text-sm">{emptyMessage}</p>
   </div>
 {:else}
-  <Table>
+  <Table class={className}>
     <TableHeader>
       <TableRow>
         <TableHead class="w-24">Severity</TableHead>
@@ -53,8 +38,8 @@
         <TableRow>
           <TableCell>
             <Badge
-              variant={severityVariant(issue.severity)}
-              class={severityClass(issue.severity)}
+              variant={getSeverityVariant(issue.severity)}
+              class={getSeverityClass(issue.severity)}
             >
               {issue.severity}
             </Badge>

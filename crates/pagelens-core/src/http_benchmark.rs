@@ -197,11 +197,18 @@ impl HttpBenchmarker {
 
         let is_duration_mode = options.duration_secs.filter(|&d| d > 0.0).is_some();
         // total = 0 signals "duration mode" to the callback.
-        let target_requests = if is_duration_mode { 0 } else { options.requests.max(1) };
+        let target_requests = if is_duration_mode {
+            0
+        } else {
+            options.requests.max(1)
+        };
         let connections = options.connections.max(1);
         let method = Method::from_bytes(options.method.as_bytes())
             .map_err(|err| Error::HttpRequestFailed(err.to_string()))?;
-        let timeout = options.timeout_ms.filter(|&v| v > 0).map(Duration::from_millis);
+        let timeout = options
+            .timeout_ms
+            .filter(|&v| v > 0)
+            .map(Duration::from_millis);
         let body_opt = options.body.clone();
         let inject_accept_encoding = !options
             .headers
@@ -215,8 +222,16 @@ impl HttpBenchmarker {
 
         // Channel sizing: small buffer for duration mode (producer is live),
         // full capacity for request mode (producer pre-fills).
-        let work_cap = if is_duration_mode { connections * 4 } else { target_requests };
-        let result_cap = if is_duration_mode { connections * 16 } else { target_requests + connections };
+        let work_cap = if is_duration_mode {
+            connections * 4
+        } else {
+            target_requests
+        };
+        let result_cap = if is_duration_mode {
+            connections * 16
+        } else {
+            target_requests + connections
+        };
 
         let (work_tx, work_rx) = mpsc::channel::<usize>(work_cap.max(8));
         let work_rx = Arc::new(Mutex::new(work_rx));
@@ -246,8 +261,8 @@ impl HttpBenchmarker {
                         break;
                     }
                     if let Some(target_qps) = qps.filter(|q| *q > 0.0) {
-                        let target = schedule_start
-                            + Duration::from_secs_f64((i as f64 + 1.0) / target_qps);
+                        let target =
+                            schedule_start + Duration::from_secs_f64((i as f64 + 1.0) / target_qps);
                         tokio::time::sleep_until(target.into()).await;
                         if cancel_requested.load(Ordering::Relaxed) {
                             break;
@@ -305,7 +320,10 @@ impl HttpBenchmarker {
                     let send_result = async {
                         let mut req = client.request(method.clone(), &url);
                         if inject_accept_encoding {
-                            req = req.header(reqwest::header::ACCEPT_ENCODING, "gzip, compress, deflate, br");
+                            req = req.header(
+                                reqwest::header::ACCEPT_ENCODING,
+                                "gzip, compress, deflate, br",
+                            );
                         }
                         if let Some(ref body) = body_opt {
                             req = req.body(body.clone());
@@ -447,7 +465,8 @@ impl HttpBenchmarker {
                     "connection reset".to_string()
                 } else if err.to_lowercase().contains("dns") {
                     "dns error".to_string()
-                } else if err.contains("certificate") || err.contains("tls") || err.contains("ssl") {
+                } else if err.contains("certificate") || err.contains("tls") || err.contains("ssl")
+                {
                     "tls/certificate error".to_string()
                 } else if err.to_lowercase().contains("redirect") {
                     "redirection limit reached".to_string()

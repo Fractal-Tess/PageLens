@@ -23,12 +23,14 @@
     SinglePagePayload,
     Snapshot
   } from '$lib/types'
-  import IssuesTable from '$lib/components/report/IssuesTable.svelte'
-  import MetaDetails from '$lib/components/report/MetaDetails.svelte'
-  import SocialMeta from '$lib/components/report/SocialMeta.svelte'
-  import HeadingStructure from '$lib/components/report/HeadingStructure.svelte'
-  import PerformanceTimeline from '$lib/components/report/PerformanceTimeline.svelte'
-  import DomTree from '$lib/components/report/DomTree.svelte'
+  import {
+    IssuesTable,
+    MetaDetails,
+    SocialMeta,
+    HeadingStructure,
+    PerformanceTimeline,
+    DomTree,
+  } from '@pagelens/ui'
 
   type PageRow = {
     id: string

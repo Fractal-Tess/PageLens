@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { location, link } from 'svelte-spa-router'
-  import { toggleMode, mode } from 'mode-watcher'
-  import { cn } from '$lib/utils'
+  import { location, link } from 'svelte-spa-router';
+  import { toggleMode, mode } from 'mode-watcher';
   import {
     SidebarHeader,
     SidebarContent,
@@ -13,9 +12,8 @@
     SidebarMenuItem,
     SidebarMenuButton,
     SidebarRail,
-    Sidebar
-  } from '@pagelens/ui/shadcn/sidebar'
-  import { Button } from '@pagelens/ui/shadcn/button'
+    Sidebar,
+  } from '@pagelens/ui/shadcn/sidebar';
   import {
     LayoutDashboard,
     Scan,
@@ -26,60 +24,51 @@
     FileText,
     Sun,
     Moon,
-    Search
-  } from '@lucide/svelte'
+    Search,
+  } from '@lucide/svelte';
 
-  type NavItem = {
-    label: string
-    href: string
-    icon: typeof LayoutDashboard
-  }
-
-  type NavGroup = {
-    label: string
-    items: NavItem[]
-  }
+  type NavItem = { label: string; href: string; icon: typeof LayoutDashboard };
+  type NavGroup = { label: string; items: NavItem[] };
 
   const primaryNavGroups: NavGroup[] = [
     {
       label: 'Overview',
-      items: [{ label: 'Dashboard', href: '/', icon: LayoutDashboard }]
+      items: [{ label: 'Dashboard', href: '/', icon: LayoutDashboard }],
     },
     {
       label: 'Analyze',
       items: [
         { label: 'Simple', href: '/#simple', icon: Scan },
-        { label: 'Advanced', href: '/#advanced', icon: SlidersHorizontal }
-      ]
+        { label: 'Advanced', href: '/#advanced', icon: SlidersHorizontal },
+      ],
     },
     {
       label: 'Manage',
       items: [
         { label: 'Profiles', href: '/#profiles', icon: Settings2 },
-        { label: 'History', href: '/#history', icon: History }
-      ]
-    }
-  ]
+        { label: 'History', href: '/#history', icon: History },
+      ],
+    },
+  ];
 
   const contextualNavItems = $derived(() => {
-    const current = $location || '/'
-    const items: Array<{ label: string; href: string; icon: typeof Activity }> =
-      []
+    const current = $location || '/';
+    const items: Array<{ label: string; href: string; icon: typeof Activity }> = [];
 
     if (current.startsWith('/run/')) {
-      items.push({ label: 'Current Run', href: current, icon: Activity })
+      items.push({ label: 'Current Run', href: current, icon: Activity });
     }
 
     if (current.includes('/page/')) {
-      items.push({ label: 'Current Page', href: current, icon: FileText })
+      items.push({ label: 'Current Page', href: current, icon: FileText });
     }
 
-    return items
-  })
+    return items;
+  });
 
   function isActive(href: string, loc: string): boolean {
-    if (href === '/') return loc === '/' || loc === ''
-    return loc === href.replace('/#', '/')
+    if (href === '/') return loc === '/' || loc === '';
+    return loc === href.replace('/#', '/');
   }
 </script>
 
@@ -91,10 +80,7 @@
       >
         <Search class="h-4 w-4 text-white" />
       </div>
-      <span
-        class="font-semibold tracking-tight group-data-[collapsible=icon]:hidden"
-        >PageLens</span
-      >
+      <span class="font-semibold tracking-tight group-data-[collapsible=icon]:hidden">PageLens</span>
     </div>
   </SidebarHeader>
 
@@ -131,10 +117,7 @@
           <SidebarMenu>
             {#each contextualNavItems() as item}
               <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={isActive(item.href, $location)}
-                  tooltipContent={item.label}
-                >
+                <SidebarMenuButton isActive={isActive(item.href, $location)} tooltipContent={item.label}>
                   {#snippet child({ props })}
                     <a use:link href={item.href} {...props}>
                       <item.icon />
