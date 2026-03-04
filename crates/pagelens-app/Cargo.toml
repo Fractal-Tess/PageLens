@@ -1,0 +1,18 @@
+[package]
+name = "pagelens-app"
+description = "Application services for pagelens"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+pagelens-core = { workspace = true }
+pagelens-db = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }

@@ -10,7 +10,7 @@
 //! - crawl_generates_summary_report — Summary generation
 //!
 //! Integration tests use the running test applications.
-//! Run `bun run start-test-apps` from the project root before running tests.
+//! Run `bun run start-apps` from the project root before running tests.
 
 mod common;
 
@@ -56,7 +56,10 @@ async fn can_crawl_single_page() {
     assert!(result.is_ok(), "Crawl should succeed");
     let crawl_result = result.unwrap();
 
-    assert!(!crawl_result.pages.is_empty(), "Should have at least 1 page");
+    assert!(
+        !crawl_result.pages.is_empty(),
+        "Should have at least 1 page"
+    );
 
     let seed_page = crawl_result
         .pages

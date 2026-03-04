@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-//! Common test utilities for integration tests with test-apps
+//! Common test utilities for integration tests with apps
 //!
 //! This module provides helper functions for connecting to the running
 //! test applications (Next.js and SvelteKit).
@@ -7,7 +7,7 @@
 //! Prerequisites:
 //!   - Next.js test app should be running on port 44791 (or $NEXTJS_PORT)
 //!   - SvelteKit test app should be running on port 44792 (or $SVELTE_PORT)
-//!   - Run `bun run start-test-apps` from the project root to start both
+//!   - Run `bun run start-apps` from the project root to start both
 
 use pagelens_core::browser::Browser;
 use pagelens_core::crawl::{CrawlOptions, CrawlResult, Crawler};
@@ -101,11 +101,13 @@ pub async fn assert_has_meta_tags(url: &str, expected: &[&str]) -> anyhow::Resul
     let report = seo_report_from_url(url).await?;
 
     for tag in expected {
-        let meta_tag = MetaTag::from_str(tag)
-            .ok_or_else(|| anyhow::anyhow!("Unknown meta tag: {}", tag))?;
+        let meta_tag =
+            MetaTag::from_str(tag).ok_or_else(|| anyhow::anyhow!("Unknown meta tag: {}", tag))?;
 
         match meta_tag {
-            MetaTag::Title => anyhow::ensure!(report.meta.title.is_some(), "Missing title meta tag"),
+            MetaTag::Title => {
+                anyhow::ensure!(report.meta.title.is_some(), "Missing title meta tag")
+            }
             MetaTag::Description => anyhow::ensure!(
                 report.meta.description.is_some(),
                 "Missing description meta tag"
@@ -210,7 +212,7 @@ pub async fn svelte_available() -> bool {
 
 /// Skip message when test servers are not available
 pub const SKIP_MESSAGE: &str = "Test servers not available. \
-    Run 'bun run start-test-apps' from the project root first. \
+    Run 'bun run start-apps' from the project root first. \
     Expected: Next.js on http://localhost:44791, SvelteKit on http://localhost:44792";
 
 /// Get a list of all page paths available in the Next.js test app
@@ -225,6 +227,7 @@ pub fn nextjs_page_paths() -> Vec<&'static str> {
         "/legacy",
         "/services",
         "/slow-page",
+        "/redirect-chain/final",
     ]
 }
 
@@ -239,5 +242,6 @@ pub fn svelte_page_paths() -> Vec<&'static str> {
         "/products",
         "/seo-test",
         "/slow-page",
+        "/redirect-chain/final",
     ]
 }

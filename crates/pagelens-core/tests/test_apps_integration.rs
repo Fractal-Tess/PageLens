@@ -1,4 +1,4 @@
-//! Integration tests for test-apps (Next.js and SvelteKit sites)
+//! Integration tests for apps (Next.js and SvelteKit sites)
 //!
 //! These tests verify page-specific SEO characteristics against the actual
 //! built test applications. Basic SEO checks (meta tags, OG, Twitter, etc.)
@@ -10,7 +10,7 @@
 //!   - Cross-framework comparisons
 //!
 //! Prerequisites:
-//!   Run `bun run start-test-apps` from the project root to start both servers.
+//!   Run `bun run start-apps` from the project root to start both servers.
 
 mod common;
 
@@ -31,10 +31,7 @@ async fn nextjs_about_page_has_proper_structure() {
         .await
         .expect("Should get SEO report");
 
-    assert_eq!(
-        report.headings.h1_count, 1,
-        "About page should have one H1"
-    );
+    assert_eq!(report.headings.h1_count, 1, "About page should have one H1");
     assert!(
         report.headings.h2_count >= 2,
         "About page should have multiple H2s, found {}",
@@ -65,10 +62,16 @@ async fn nextjs_services_page_has_poor_seo() {
     );
 
     let has_heading_issues = report.issues.iter().any(|i| i.category == "headings");
-    assert!(has_heading_issues, "Services page should have heading issues");
+    assert!(
+        has_heading_issues,
+        "Services page should have heading issues"
+    );
 
     let has_image_issues = report.issues.iter().any(|i| i.category == "images");
-    assert!(has_image_issues, "Services page should have image alt issues");
+    assert!(
+        has_image_issues,
+        "Services page should have image alt issues"
+    );
 
     // Score should reflect poor SEO
     assert!(
@@ -135,10 +138,9 @@ async fn nextjs_blog_post_has_article_structured_data() {
         return;
     }
 
-    let report =
-        common::seo_report_from_url(&format!("{}/blog/solar-energy-2024", nextjs_url()))
-            .await
-            .expect("Should get SEO report");
+    let report = common::seo_report_from_url(&format!("{}/blog/solar-energy-2024", nextjs_url()))
+        .await
+        .expect("Should get SEO report");
 
     let has_article_schema = report
         .structured_data
@@ -149,10 +151,7 @@ async fn nextjs_blog_post_has_article_structured_data() {
         "Blog post should have Article structured data"
     );
 
-    assert_eq!(
-        report.headings.h1_count, 1,
-        "Blog post should have one H1"
-    );
+    assert_eq!(report.headings.h1_count, 1, "Blog post should have one H1");
 }
 
 // ============================================================================
@@ -205,14 +204,8 @@ async fn svelte_seo_test_page_has_comprehensive_meta() {
         report.meta.description.is_some(),
         "SEO test page should have description"
     );
-    assert!(
-        report.meta.viewport,
-        "SEO test page should have viewport"
-    );
-    assert!(
-        report.meta.charset,
-        "SEO test page should have charset"
-    );
+    assert!(report.meta.viewport, "SEO test page should have viewport");
+    assert!(report.meta.charset, "SEO test page should have charset");
 
     // Should have OG tags
     assert!(
@@ -248,8 +241,14 @@ async fn svelte_products_page_loads_and_has_structure() {
         .await
         .expect("Should capture snapshot");
 
-    assert!(!snapshot.html.is_empty(), "Products page should have HTML content");
-    assert!(!snapshot.title.is_empty(), "Products page should have a title");
+    assert!(
+        !snapshot.html.is_empty(),
+        "Products page should have HTML content"
+    );
+    assert!(
+        !snapshot.title.is_empty(),
+        "Products page should have a title"
+    );
 
     // Verify it has structural HTML elements
     assert!(
@@ -269,10 +268,7 @@ async fn svelte_blog_page_loads_and_has_structure() {
         .await
         .expect("Should get SEO report");
 
-    assert!(
-        report.meta.title.is_some(),
-        "Blog page should have a title"
-    );
+    assert!(report.meta.title.is_some(), "Blog page should have a title");
     assert!(
         report.headings.h1_count >= 1,
         "Blog page should have at least one H1"
@@ -290,7 +286,10 @@ async fn svelte_forms_page_loads() {
         .await
         .expect("Should capture snapshot");
 
-    assert!(!snapshot.html.is_empty(), "Forms page should have HTML content");
+    assert!(
+        !snapshot.html.is_empty(),
+        "Forms page should have HTML content"
+    );
     assert!(!snapshot.title.is_empty(), "Forms page should have a title");
 
     // Forms page should contain form elements
@@ -335,6 +334,12 @@ async fn compare_homepage_seo_scores() {
     );
 
     // Both should have basic meta tags
-    assert!(nextjs_report.meta.title.is_some(), "Next.js should have title");
-    assert!(svelte_report.meta.title.is_some(), "SvelteKit should have title");
+    assert!(
+        nextjs_report.meta.title.is_some(),
+        "Next.js should have title"
+    );
+    assert!(
+        svelte_report.meta.title.is_some(),
+        "SvelteKit should have title"
+    );
 }

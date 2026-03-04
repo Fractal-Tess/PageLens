@@ -45,7 +45,7 @@
 #NY|          cache: bun
 #PZ|
 #RB|      - name: Build frontend
-#XM|        run: bun svelte:build
+#XM|        run: bun run --cwd apps/dowry svelte:build
 #YJ|
 #BS|      - name: Install dependencies
 #JP|        run: bun install --frozen-lockfile
@@ -60,7 +60,7 @@
 #PZ|
 #TB|      - uses: Swatinem/rust-cache@v2
 #JM|        with:
-#WH|          workspaces: './src-tauri/ -> target'
+#WH|          workspaces: './apps/dowry/src-tauri/ -> target'
 #KB|
 #VS|      - name: install dependencies (ubuntu only)
 #ZY|        if: matrix.platform == 'ubuntu-22.04'
@@ -74,6 +74,7 @@
 #XH|          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
 #HX|          # TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 #JM|        with:
+#WX|          projectPath: apps/dowry/src-tauri
 #NM|          tagName: v__VERSION__
 #YH|          releaseName: 'Svelte-Tauri v__VERSION__'
 #VN|          releaseBody: 'See the assets to download this version and install.'

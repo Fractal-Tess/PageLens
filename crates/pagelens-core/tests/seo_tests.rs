@@ -10,7 +10,7 @@
 //! - Structured data (JSON-LD)
 //!
 //! These tests use the running test applications instead of embedded HTML.
-//! Run `bun run start-test-apps` from the project root before running tests.
+//! Run `bun run start-apps` from the project root before running tests.
 
 mod common;
 
@@ -42,12 +42,9 @@ async fn nextjs_homepage_has_open_graph_tags() {
         return;
     }
 
-    common::assert_has_meta_tags(
-        &common::nextjs_url(),
-        &["og:title", "og:description"],
-    )
-    .await
-    .expect("Should have Open Graph tags");
+    common::assert_has_meta_tags(&common::nextjs_url(), &["og:title", "og:description"])
+        .await
+        .expect("Should have Open Graph tags");
 }
 
 #[tokio::test]
@@ -207,9 +204,43 @@ async fn svelte_seo_test_page_has_issues() {
                 "best-practices",
                 "performance",
             ]
-                .contains(&issue.category.as_str()),
+            .contains(&issue.category.as_str()),
             "Issue category '{}' is not a known category",
             issue.category
         );
     }
+}
+
+#[tokio::test]
+async fn nextjs_redirect_chain_route_reports_redirect_issue() {
+    if !common::nextjs_available().await {
+        common::skip_or_fail("Next.js");
+        return;
+    }
+
+    let url = format!("{}/redirect-chain/start", common::nextjs_url());
+    let report = common::seo_report_from_url(&url)
+        .await
+        .expect("Should get SEO report");
+
+    assert!(report.issues.iter().any(|issue| {
+        issue.category == "performance" && issue.message.contains("Redirect chain")
+    }));
+}
+
+#[tokio::test]
+async fn svelte_redirect_chain_route_reports_redirect_issue() {
+    if !common::svelte_available().await {
+        common::skip_or_fail("SvelteKit");
+        return;
+    }
+
+    let url = format!("{}/redirect-chain/start", common::svelte_url());
+    let report = common::seo_report_from_url(&url)
+        .await
+        .expect("Should get SEO report");
+
+    assert!(report.issues.iter().any(|issue| {
+        issue.category == "performance" && issue.message.contains("Redirect chain")
+    }));
 }

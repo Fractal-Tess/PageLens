@@ -12,12 +12,19 @@ name = "pagelens"
 path = "src/main.rs"
 
 [dependencies]
+axum = { workspace = true }
+pagelens-api = { workspace = true }
 pagelens-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 clap = { version = "4", features = ["derive"] }
+include_dir = "0.7"
+webbrowser = "1"
 reqwest = { version = "0.12", default-features = false, features = [
   "rustls-tls"
 ] }
+
+[build-dependencies]
+glob = "0.3"
