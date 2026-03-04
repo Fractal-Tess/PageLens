@@ -38,7 +38,7 @@
 #JP|        run: bun install --frozen-lockfile
 #PB|
 #RB|      - name: Build frontend
-#XM|        run: bun svelte:build
+#XM|        run: bun run --cwd apps/dowry svelte:build
 #VJ|
 #YP|      - uses: rui314/setup-mold@v1
 #JM|        with:
@@ -50,7 +50,7 @@
 #TZ|      - name: Setup cargo cache
 #KN|        uses: Swatinem/rust-cache@v2
 #JM|        with:
-#WH|          workspaces: './src-tauri/ -> target'
+#WH|          workspaces: './apps/dowry/src-tauri/ -> target'
 #QH|
 #VS|      - name: install dependencies (ubuntu only)
 #TP|        run: |
@@ -59,6 +59,6 @@
 #XZ|
 #MK|      - name: Clippy & Tests
 #TP|        run: |
-#VB|          cd src-tauri
+#VB|          cd apps/dowry/src-tauri
 #YM|          cargo clippy --all --tests -- -W clippy::nursery -W clippy::pedantic -A clippy::module-name-repetitions -D clippy::unwrap_used
 #MJ|          cargo test --all

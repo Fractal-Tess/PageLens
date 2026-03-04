@@ -49,6 +49,7 @@ impl Default for AnalysisRunStatus {
 pub enum AnalysisType {
     Single,
     Crawl,
+    HttpBenchmark,
 }
 
 /// Summary statistics for quick display in history list.
@@ -161,4 +162,32 @@ pub struct CreateAnalysisPageResult {
     pub warning_count: u32,
     pub links_found_count: u32,
     pub error_message: Option<String>,
+}
+
+/// A cached/downloaded asset associated with an analysis run.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct AnalysisAsset {
+    pub id: String,
+    pub run_id: String,
+    pub original_url: String,
+    /// Asset type: 'html', 'favicon', 'og_image', 'javascript', 'stylesheet', 'media', 'font'
+    pub asset_type: String,
+    pub content_type: Option<String>,
+    /// Filename only (e.g. "page.html"); full path = assets_dir/{run_id}/{local_path}
+    pub local_path: String,
+    pub file_size: i64,
+    pub download_error: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Input for inserting a new asset record.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateAnalysisAsset {
+    pub run_id: String,
+    pub original_url: String,
+    pub asset_type: String,
+    pub content_type: Option<String>,
+    pub local_path: String,
+    pub file_size: i64,
+    pub download_error: Option<String>,
 }

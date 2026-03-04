@@ -6,7 +6,7 @@
 //! - can_capture_computed_styles — Extracts styles for contrast checking
 //!
 //! These tests use the running test applications instead of embedded HTML.
-//! Run `bun run start-test-apps` from the project root before running tests.
+//! Run `bun run start-apps` from the project root before running tests.
 
 mod common;
 
@@ -43,7 +43,8 @@ async fn can_capture_page_snapshot_from_nextjs() {
             snapshot.url.contains("localhost"),
             "URL should be localhost"
         );
-    }).await;
+    })
+    .await;
 
     if result.is_err() {
         panic!("Test timed out after 15 seconds");
@@ -141,7 +142,10 @@ async fn can_capture_network_requests_from_nextjs() {
         .network_requests
         .iter()
         .any(|request| request.duration_ms.unwrap_or(0.0) > 0.0);
-    assert!(has_duration, "At least one network request should have duration");
+    assert!(
+        has_duration,
+        "At least one network request should have duration"
+    );
 }
 
 #[tokio::test]
@@ -208,7 +212,10 @@ async fn snapshot_with_custom_options_from_nextjs() {
         snapshot.accessibility_tree.is_empty(),
         "A11y tree should be empty"
     );
-    assert!(snapshot.computed_styles.is_empty(), "Styles should be empty");
+    assert!(
+        snapshot.computed_styles.is_empty(),
+        "Styles should be empty"
+    );
 }
 
 // ============================================================================
@@ -320,7 +327,10 @@ async fn snapshot_extracts_referenced_assets_from_nextjs_about() {
         "Should capture Next.js CSS bundles"
     );
     assert!(
-        assets.media.iter().any(|u| u.contains("/images/about-office.jpg")),
+        assets
+            .media
+            .iter()
+            .any(|u| u.contains("/images/about-office.jpg")),
         "Should capture media references from page images"
     );
 }

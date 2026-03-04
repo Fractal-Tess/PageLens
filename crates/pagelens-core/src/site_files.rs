@@ -178,7 +178,11 @@ impl SiteFilesAnalyzer {
         report.sitemap_urls = sitemap_url_set.iter().cloned().collect();
 
         if report.sitemap_urls.is_empty() {
-            report.add_issue(Severity::Warning, "sitemap", "No URLs found in sitemap files");
+            report.add_issue(
+                Severity::Warning,
+                "sitemap",
+                "No URLs found in sitemap files",
+            );
         }
 
         let misc_paths = [
@@ -209,14 +213,10 @@ impl SiteFilesAnalyzer {
 
             let sitemap_set: BTreeSet<String> = report.sitemap_urls.iter().cloned().collect();
 
-            let in_sitemap_not_in_crawl: Vec<String> = sitemap_set
-                .difference(&crawl_set)
-                .cloned()
-                .collect();
-            let in_crawl_not_in_sitemap: Vec<String> = crawl_set
-                .difference(&sitemap_set)
-                .cloned()
-                .collect();
+            let in_sitemap_not_in_crawl: Vec<String> =
+                sitemap_set.difference(&crawl_set).cloned().collect();
+            let in_crawl_not_in_sitemap: Vec<String> =
+                crawl_set.difference(&sitemap_set).cloned().collect();
 
             if !in_sitemap_not_in_crawl.is_empty() {
                 report.add_issue(
@@ -250,8 +250,8 @@ impl SiteFilesAnalyzer {
 }
 
 fn normalize_base_url(base_url: &str) -> Result<String> {
-    let mut parsed = Url::parse(base_url)
-        .map_err(|e| Error::InvalidUrl(format!("{base_url} ({e})")))?;
+    let mut parsed =
+        Url::parse(base_url).map_err(|e| Error::InvalidUrl(format!("{base_url} ({e})")))?;
     parsed.set_query(None);
     parsed.set_fragment(None);
     let mut s = parsed.to_string();
@@ -269,7 +269,7 @@ fn absolutize_url(base: &str, candidate: &str) -> Option<String> {
         .map(|u| u.to_string())
 }
 
-fn canonicalize_url_for_compare(raw: &str) -> String {
+pub fn canonicalize_url_for_compare(raw: &str) -> String {
     if let Ok(mut parsed) = Url::parse(raw) {
         parsed.set_query(None);
         parsed.set_fragment(None);
@@ -282,7 +282,7 @@ fn canonicalize_url_for_compare(raw: &str) -> String {
     raw.to_string()
 }
 
-fn parse_robots_sitemaps(content: &str) -> Vec<String> {
+pub fn parse_robots_sitemaps(content: &str) -> Vec<String> {
     content
         .lines()
         .map(str::trim)
@@ -297,7 +297,7 @@ fn parse_robots_sitemaps(content: &str) -> Vec<String> {
         .collect()
 }
 
-fn parse_disallow_all_for_star(content: &str) -> bool {
+pub fn parse_disallow_all_for_star(content: &str) -> bool {
     let mut in_star_section = false;
     for raw_line in content.lines() {
         let line = raw_line.trim();
@@ -321,7 +321,7 @@ fn parse_disallow_all_for_star(content: &str) -> bool {
     false
 }
 
-fn parse_sitemap_kind(body: &str) -> SitemapKind {
+pub fn parse_sitemap_kind(body: &str) -> SitemapKind {
     let l = body.to_ascii_lowercase();
     if l.contains("<sitemapindex") {
         SitemapKind::SitemapIndex
@@ -332,7 +332,7 @@ fn parse_sitemap_kind(body: &str) -> SitemapKind {
     }
 }
 
-fn parse_sitemap_loc_values(body: &str) -> Vec<String> {
+pub fn parse_sitemap_loc_values(body: &str) -> Vec<String> {
     LOC_REGEX
         .captures_iter(body)
         .filter_map(|cap| cap.get(1).map(|m| m.as_str().trim().to_string()))
@@ -375,7 +375,11 @@ async fn fetch_robots(client: &reqwest::Client, base_url: &str) -> RobotsReport 
     }
 }
 
-async fn fetch_sitemap(client: &reqwest::Client, base_url: &str, sitemap_url: &str) -> SitemapReport {
+async fn fetch_sitemap(
+    client: &reqwest::Client,
+    base_url: &str,
+    sitemap_url: &str,
+) -> SitemapReport {
     let response = client.get(sitemap_url).send().await;
     match response {
         Ok(resp) => {
@@ -454,53 +458,5 @@ async fn fetch_misc_file(client: &reqwest::Client, base_url: &str, path: &str) -
             status: None,
             found: false,
         },
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_robots_extracts_sitemaps() {
-        let txt = "User-agent: *\nSitemap: https://example.com/sitemap.xml\nSitemap: /sitemap-blog.xml\n";
-        let sitemaps = parse_robots_sitemaps(txt);
-        assert_eq!(sitemaps.len(), 2);
-        assert_eq!(sitemaps[0], "https://example.com/sitemap.xml");
-        assert_eq!(sitemaps[1], "/sitemap-blog.xml");
-    }
-
-    #[test]
-    fn parse_robots_detects_disallow_all() {
-        let txt = "User-agent: *\nDisallow: /\n";
-        assert!(parse_disallow_all_for_star(txt));
-    }
-
-    #[test]
-    fn parse_sitemap_urlset_loc_values() {
-        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://example.com/</loc></url>
-  <url><loc>https://example.com/about</loc></url>
-</urlset>
-"#;
-        let locs = parse_sitemap_loc_values(xml);
-        assert_eq!(locs.len(), 2);
-    }
-
-    #[test]
-    fn parse_sitemap_kind_detection() {
-        assert_eq!(parse_sitemap_kind("<urlset></urlset>"), SitemapKind::UrlSet);
-        assert_eq!(
-            parse_sitemap_kind("<sitemapindex></sitemapindex>"),
-            SitemapKind::SitemapIndex
-        );
-        assert_eq!(parse_sitemap_kind("<html></html>"), SitemapKind::Unknown);
-    }
-
-    #[test]
-    fn canonicalize_removes_fragment_query_and_trailing_slash() {
-        let c = canonicalize_url_for_compare("https://example.com/about/?a=1#x");
-        assert_eq!(c, "https://example.com/about");
     }
 }

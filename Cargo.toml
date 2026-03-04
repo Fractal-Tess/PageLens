@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "src-tauri"]
+members = ["crates/*", "apps/tauri/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,6 +13,8 @@ repository = "https://github.com/Fractal-Tess/pagelens"
 # Internal crates
 pagelens-core = { path = "crates/pagelens-core" }
 pagelens-db = { path = "crates/pagelens-db" }
+pagelens-app = { path = "crates/pagelens-app" }
+pagelens-api = { path = "crates/pagelens-api" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -23,6 +25,8 @@ thiserror = "2"
 
 # Async
 tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = { version = "0.7", features = ["sync"] }
 
 # Browser automation
 chromey = { version = "2.38", default-features = false, features = [
@@ -31,6 +35,11 @@ chromey = { version = "2.38", default-features = false, features = [
   "serde0"
 ] }
 getrandom = "=0.2.15"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+axum = { version = "0.8", features = ["macros"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 
 # Future crates (noted for later):
 # pagelens-rules  — pluggable rule/check definitions

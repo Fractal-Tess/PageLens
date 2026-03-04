@@ -1,6 +1,7 @@
 use crate::models::{
-    AnalysisPageResult, AnalysisRun, AnalysisRunStatus, AnalysisSummary, AnalysisType,
-    CreateAnalysisPageResult, CreateAnalysisRun, HistoryListItem, UpdateAnalysisRun,
+    AnalysisAsset, AnalysisPageResult, AnalysisRun, AnalysisRunStatus, AnalysisSummary,
+    AnalysisType, CreateAnalysisAsset, CreateAnalysisPageResult, CreateAnalysisRun,
+    HistoryListItem, UpdateAnalysisRun,
 };
 use crate::prelude::*;
 use chrono::{DateTime, Utc};
@@ -27,6 +28,7 @@ impl<'a> AnalysisRepository<'a> {
         let analysis_type_str = match input.analysis_type {
             AnalysisType::Single => "single",
             AnalysisType::Crawl => "crawl",
+            AnalysisType::HttpBenchmark => "http_benchmark",
         };
         let status_str = status_to_str(input.status);
 
@@ -102,6 +104,7 @@ impl<'a> AnalysisRepository<'a> {
             let analysis_type_str: String = row.get(4)?;
             let analysis_type = match analysis_type_str.as_str() {
                 "crawl" => AnalysisType::Crawl,
+                "http_benchmark" => AnalysisType::HttpBenchmark,
                 _ => AnalysisType::Single,
             };
 
@@ -157,7 +160,7 @@ impl<'a> AnalysisRepository<'a> {
         current_message: Option<&str>,
         progress: Option<f64>,
     ) -> Result<()> {
-        self.conn.execute(
+        let updated = self.conn.execute(
             "UPDATE analysis_runs
              SET status = ?1, current_stage = ?2, current_message = ?3, progress = ?4
              WHERE id = ?5",
@@ -170,7 +173,43 @@ impl<'a> AnalysisRepository<'a> {
             ],
         )?;
 
+        if updated == 0 {
+            return Err(Error::AnalysisRunNotFound { id: id.to_string() });
+        }
+
         Ok(())
+    }
+
+    pub fn update_run_state_if_active(
+        &self,
+        id: &str,
+        status: AnalysisRunStatus,
+        current_stage: Option<&str>,
+        current_message: Option<&str>,
+        progress: Option<f64>,
+    ) -> Result<bool> {
+        let updated = self.conn.execute(
+            "UPDATE analysis_runs
+             SET status = ?1, current_stage = ?2, current_message = ?3, progress = ?4
+             WHERE id = ?5 AND status IN ('pending', 'running')",
+            params![
+                status_to_str(status),
+                current_stage,
+                current_message,
+                progress,
+                id,
+            ],
+        )?;
+
+        if updated > 0 {
+            return Ok(true);
+        }
+
+        if !self.run_exists(id)? {
+            return Err(Error::AnalysisRunNotFound { id: id.to_string() });
+        }
+
+        Ok(false)
     }
 
     pub fn complete_run(
@@ -179,7 +218,7 @@ impl<'a> AnalysisRepository<'a> {
         payload_json: &str,
         summary: &AnalysisSummary,
     ) -> Result<()> {
-        self.conn.execute(
+        let updated = self.conn.execute(
             "UPDATE analysis_runs
              SET payload = ?1,
                  seo_score = ?2,
@@ -205,7 +244,99 @@ impl<'a> AnalysisRepository<'a> {
             ],
         )?;
 
+        if updated == 0 {
+            return Err(Error::AnalysisRunNotFound { id: id.to_string() });
+        }
+
         Ok(())
+    }
+
+    pub fn complete_run_if_active(
+        &self,
+        id: &str,
+        payload_json: &str,
+        summary: &AnalysisSummary,
+    ) -> Result<bool> {
+        let updated = self.conn.execute(
+            "UPDATE analysis_runs
+             SET payload = ?1,
+                 seo_score = ?2,
+                 page_count = ?3,
+                 total_issues = ?4,
+                 error_count = ?5,
+                 warning_count = ?6,
+                 duration_ms = ?7,
+                 status = 'completed',
+                 current_stage = 'complete',
+                 current_message = 'Analysis complete!',
+                 progress = 1.0
+             WHERE id = ?8 AND status IN ('pending', 'running')",
+            params![
+                payload_json,
+                summary.seo_score,
+                summary.page_count as i64,
+                summary.total_issues as i64,
+                summary.error_count as i64,
+                summary.warning_count as i64,
+                summary.duration_ms as i64,
+                id,
+            ],
+        )?;
+
+        if updated > 0 {
+            return Ok(true);
+        }
+
+        if !self.run_exists(id)? {
+            return Err(Error::AnalysisRunNotFound { id: id.to_string() });
+        }
+
+        Ok(false)
+    }
+
+    pub fn complete_run_as_cancelled_if_active(
+        &self,
+        id: &str,
+        payload_json: &str,
+        summary: &AnalysisSummary,
+        message: &str,
+    ) -> Result<bool> {
+        let updated = self.conn.execute(
+            "UPDATE analysis_runs
+             SET payload = ?1,
+                 seo_score = ?2,
+                 page_count = ?3,
+                 total_issues = ?4,
+                 error_count = ?5,
+                 warning_count = ?6,
+                 duration_ms = ?7,
+                 status = 'failed',
+                 current_stage = 'cancelled',
+                 current_message = ?8,
+                 progress = 1.0
+             WHERE id = ?9 AND status IN ('pending', 'running')",
+            params![
+                payload_json,
+                summary.seo_score,
+                summary.page_count as i64,
+                summary.total_issues as i64,
+                summary.error_count as i64,
+                summary.warning_count as i64,
+                summary.duration_ms as i64,
+                message,
+                id,
+            ],
+        )?;
+
+        if updated > 0 {
+            return Ok(true);
+        }
+
+        if !self.run_exists(id)? {
+            return Err(Error::AnalysisRunNotFound { id: id.to_string() });
+        }
+
+        Ok(false)
     }
 
     pub fn insert_page_result(
@@ -286,6 +417,73 @@ impl<'a> AnalysisRepository<'a> {
         Ok(items)
     }
 
+    /// Insert a downloaded asset record.
+    pub fn insert_asset(&self, input: CreateAnalysisAsset) -> Result<AnalysisAsset> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let created_at = Utc::now();
+
+        self.conn.execute(
+            "INSERT INTO analysis_assets (
+                id, run_id, original_url, asset_type, content_type,
+                local_path, file_size, download_error, created_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                &id,
+                &input.run_id,
+                &input.original_url,
+                &input.asset_type,
+                input.content_type.as_deref(),
+                &input.local_path,
+                input.file_size,
+                input.download_error.as_deref(),
+                created_at.to_rfc3339(),
+            ],
+        )?;
+
+        Ok(AnalysisAsset {
+            id,
+            run_id: input.run_id,
+            original_url: input.original_url,
+            asset_type: input.asset_type,
+            content_type: input.content_type,
+            local_path: input.local_path,
+            file_size: input.file_size,
+            download_error: input.download_error,
+            created_at,
+        })
+    }
+
+    /// List all cached assets for a run.
+    pub fn list_assets(&self, run_id: &str) -> Result<Vec<AnalysisAsset>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, run_id, original_url, asset_type, content_type,
+                    local_path, file_size, download_error, created_at
+             FROM analysis_assets
+             WHERE run_id = ?1
+             ORDER BY created_at ASC",
+        )?;
+
+        let rows = stmt.query_map([run_id], |row| {
+            Ok(AnalysisAsset {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                original_url: row.get(2)?,
+                asset_type: row.get(3)?,
+                content_type: row.get(4)?,
+                local_path: row.get(5)?,
+                file_size: row.get(6)?,
+                download_error: row.get(7)?,
+                created_at: parse_datetime(row.get(8)?)?,
+            })
+        })?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row?);
+        }
+        Ok(items)
+    }
+
     /// Delete a single analysis run by ID.
     pub fn delete(&self, id: &str) -> Result<()> {
         self.conn
@@ -328,6 +526,7 @@ impl<'a> AnalysisRepository<'a> {
         let analysis_type_str: String = row.get(4)?;
         let analysis_type = match analysis_type_str.as_str() {
             "crawl" => AnalysisType::Crawl,
+            "http_benchmark" => AnalysisType::HttpBenchmark,
             _ => AnalysisType::Single,
         };
 
@@ -353,6 +552,15 @@ impl<'a> AnalysisRepository<'a> {
             current_message: row.get(14)?,
             progress: row.get(15)?,
         })
+    }
+
+    fn run_exists(&self, id: &str) -> Result<bool> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM analysis_runs WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
     }
 }
 
