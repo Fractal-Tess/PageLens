@@ -1,7 +1,7 @@
 //! Page snapshot capture — DOM, accessibility tree, performance timing, and styles.
 
-use crate::prelude::*;
 use crate::browser::Page;
+use crate::prelude::*;
 use scraper::{Html, Selector};
 use std::collections::{HashMap, HashSet};
 use url::Url;
@@ -119,6 +119,7 @@ pub struct ReferencedAssets {
     pub javascript: Vec<String>,
     pub stylesheets: Vec<String>,
     pub media: Vec<String>,
+    pub fonts: Vec<String>,
 }
 
 /// A comprehensive snapshot of a web page.
@@ -137,6 +138,7 @@ pub struct Snapshot {
     /// Computed styles for visible elements (if requested).
     pub computed_styles: Vec<ComputedStyle>,
     pub referenced_assets: ReferencedAssets,
+    pub favicon_url: Option<String>,
     pub main_resource_network: MainResourceNetwork,
     pub network_requests: Vec<NetworkRequestRecord>,
     pub capture_issues: Vec<CaptureIssue>,
@@ -164,6 +166,7 @@ impl Snapshot {
             },
             computed_styles: Vec::new(),
             referenced_assets: ReferencedAssets::default(),
+            favicon_url: None,
             main_resource_network: MainResourceNetwork::default(),
             network_requests: Vec::new(),
             capture_issues: Vec::new(),
@@ -174,22 +177,27 @@ impl Snapshot {
 /// Extension trait for Page to add snapshot functionality.
 pub trait SnapshotExt {
     /// Capture a snapshot of the current page state.
-    fn snapshot(&self, options: SnapshotOptions) -> impl std::future::Future<Output = Result<Snapshot>> + Send;
+    fn snapshot(
+        &self,
+        options: SnapshotOptions,
+    ) -> impl std::future::Future<Output = Result<Snapshot>> + Send;
 }
 
 impl SnapshotExt for Page {
     async fn snapshot(&self, options: SnapshotOptions) -> Result<Snapshot> {
         let url = self.url().to_string();
         let title = self.title().await?;
-        
+
         let mut snapshot = Snapshot::new(url, title);
-        
+
         // Capture HTML if requested
         if options.include_html {
             snapshot.html = self.html().await?;
-            snapshot.referenced_assets = extract_referenced_assets(&snapshot.html, &snapshot.url);
+            let (assets, favicon_url) = extract_referenced_assets(&snapshot.html, &snapshot.url);
+            snapshot.referenced_assets = assets;
+            snapshot.favicon_url = favicon_url;
         }
-        
+
         // Capture accessibility tree if requested
         if options.include_accessibility_tree {
             match capture_accessibility_tree(self).await {
@@ -200,7 +208,7 @@ impl SnapshotExt for Page {
                 }),
             }
         }
-        
+
         // Capture performance timing if requested
         if options.include_performance_timing {
             match capture_performance_timing(self).await {
@@ -211,7 +219,7 @@ impl SnapshotExt for Page {
                 }),
             }
         }
-        
+
         // Capture computed styles if requested
         if options.include_computed_styles {
             match capture_computed_styles(self).await {
@@ -234,7 +242,7 @@ impl SnapshotExt for Page {
 
             snapshot.network_requests = self.network_requests().await;
         }
-        
+
         Ok(snapshot)
     }
 }
@@ -308,7 +316,8 @@ async fn capture_main_resource_network(page: &Page) -> Result<MainResourceNetwor
         .map_err(|e| Error::ExtractionFailed(format!("Network metadata JSON parse failed: {e}")))
 }
 
-fn extract_referenced_assets(html: &str, page_url: &str) -> ReferencedAssets {
+/// Extract referenced assets from HTML. Returns `(assets, favicon_url)`.
+fn extract_referenced_assets(html: &str, page_url: &str) -> (ReferencedAssets, Option<String>) {
     let document = Html::parse_document(html);
     let base = Url::parse(page_url).ok();
 
@@ -368,11 +377,50 @@ fn extract_referenced_assets(html: &str, page_url: &str) -> ReferencedAssets {
         }
     }
 
-    ReferencedAssets {
-        javascript,
-        stylesheets,
-        media,
+    // Extract font preloads
+    let mut fonts = Vec::new();
+    let mut fonts_seen = HashSet::new();
+    if let Ok(font_selector) = Selector::parse(r#"link[rel="preload"][as="font"][href]"#) {
+        for el in document.select(&font_selector) {
+            if let Some(href) = el.value().attr("href") {
+                push_asset(&mut fonts, &mut fonts_seen, href, base.as_ref());
+            }
+        }
     }
+
+    // Extract favicon: prefer icon, then shortcut icon, then apple-touch-icon
+    let favicon_url = extract_favicon(&document, base.as_ref());
+
+    (
+        ReferencedAssets {
+            javascript,
+            stylesheets,
+            media,
+            fonts,
+        },
+        favicon_url,
+    )
+}
+
+fn extract_favicon(document: &Html, base: Option<&Url>) -> Option<String> {
+    let candidates = [
+        r#"link[rel="icon"][href]"#,
+        r#"link[rel="shortcut icon"][href]"#,
+        r#"link[rel="apple-touch-icon"][href]"#,
+    ];
+    for pattern in candidates {
+        if let Ok(selector) = Selector::parse(pattern) {
+            if let Some(el) = document.select(&selector).next() {
+                if let Some(href) = el.value().attr("href") {
+                    let normalized = normalize_asset_url(href, base);
+                    if !normalized.is_empty() {
+                        return Some(normalized);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 fn parse_srcset_urls(srcset: &str) -> Vec<String> {
@@ -384,7 +432,12 @@ fn parse_srcset_urls(srcset: &str) -> Vec<String> {
         .collect()
 }
 
-fn push_asset(collection: &mut Vec<String>, seen: &mut HashSet<String>, raw: &str, base: Option<&Url>) {
+fn push_asset(
+    collection: &mut Vec<String>,
+    seen: &mut HashSet<String>,
+    raw: &str,
+    base: Option<&Url>,
+) {
     if raw.is_empty() || raw.starts_with("data:") || raw.starts_with("javascript:") {
         return;
     }
@@ -413,7 +466,7 @@ fn normalize_asset_url(raw: &str, base: Option<&Url>) -> String {
 async fn capture_accessibility_tree(page: &Page) -> Result<Vec<AccessibilityNode>> {
     // For now, return a simple stub implementation
     // In the full implementation, this would use CDP's Accessibility domain
-    
+
     // Try to get accessibility tree via JavaScript evaluation
     let js = r#"
         (function() {
@@ -493,7 +546,7 @@ async fn capture_accessibility_tree(page: &Page) -> Result<Vec<AccessibilityNode
             return JSON.stringify(getAccessibleTree(document.body));
         })()
     "#;
-    
+
     let cdp_page = page
         .cdp_page()
         .ok_or_else(|| Error::ExtractionFailed("CDP page unavailable".to_string()))?;
@@ -514,46 +567,146 @@ async fn capture_accessibility_tree(page: &Page) -> Result<Vec<AccessibilityNode
 /// Capture performance timing metrics.
 async fn capture_performance_timing(page: &Page) -> Result<PerformanceTiming> {
     let js = r#"
-        (function() {
+        (async function() {
             const origin = performance.timeOrigin || 0;
-            const paintEntries = performance.getEntriesByType('paint') || [];
-            const firstPaint = paintEntries.find(e => e.name === 'first-paint');
-            const firstContentfulPaint = paintEntries.find(e => e.name === 'first-contentful-paint');
-            const lcpEntries = performance.getEntriesByType('largest-contentful-paint') || [];
-            const lcp = lcpEntries.length ? lcpEntries[lcpEntries.length - 1] : null;
-            const clsEntries = performance.getEntriesByType('layout-shift') || [];
-            const cls = clsEntries.reduce((sum, entry) => {
-                if (entry && entry.hadRecentInput) {
-                    return sum;
+            const navEntry = performance.getEntriesByType('navigation')[0] || null;
+
+            const supported =
+                typeof PerformanceObserver !== 'undefined'
+                    ? PerformanceObserver.supportedEntryTypes || []
+                    : [];
+
+            let lcpStart = null;
+            let clsValue = 0;
+            const interactionById = new Map();
+
+            const observers = [];
+            function addObserver(type, handler, options = {}) {
+                if (!supported.includes(type)) return;
+                try {
+                    const observer = new PerformanceObserver((list) => {
+                        for (const entry of list.getEntries()) {
+                            handler(entry);
+                        }
+                    });
+                    observer.observe({ type, buffered: true, ...options });
+                    observers.push(observer);
+                } catch (_) {
+                    // Ignore unsupported observer settings
                 }
-                return sum + (entry && typeof entry.value === 'number' ? entry.value : 0);
-            }, 0);
-            const inpEntries = performance.getEntriesByType('event') || [];
-            const inpDurations = inpEntries
-                .filter(e => e && e.interactionId > 0 && typeof e.duration === 'number')
-                .map(e => e.duration)
-                .filter(d => Number.isFinite(d) && d >= 0)
+            }
+
+            addObserver('largest-contentful-paint', (entry) => {
+                if (typeof entry.startTime === 'number' && Number.isFinite(entry.startTime)) {
+                    lcpStart = entry.startTime;
+                }
+            });
+
+            addObserver('layout-shift', (entry) => {
+                const value = typeof entry.value === 'number' && Number.isFinite(entry.value)
+                    ? entry.value
+                    : 0;
+                if (!entry.hadRecentInput) {
+                    clsValue += value;
+                }
+            });
+
+            addObserver(
+                'event',
+                (entry) => {
+                    const interactionId = typeof entry.interactionId === 'number'
+                        ? entry.interactionId
+                        : 0;
+                    const duration = typeof entry.duration === 'number' && Number.isFinite(entry.duration)
+                        ? entry.duration
+                        : 0;
+                    if (interactionId > 0 && duration >= 0) {
+                        const previous = interactionById.get(interactionId) ?? 0;
+                        if (duration > previous) {
+                            interactionById.set(interactionId, duration);
+                        }
+                    }
+                },
+                { durationThreshold: 16 }
+            );
+
+            // first-input can expose the first interaction even when event timing
+            // thresholds/filtering would otherwise miss it.
+            addObserver('first-input', (entry) => {
+                const duration = typeof entry.duration === 'number' && Number.isFinite(entry.duration)
+                    ? entry.duration
+                    : 0;
+                if (duration >= 0) {
+                    const key = -1;
+                    const previous = interactionById.get(key) ?? 0;
+                    if (duration > previous) {
+                        interactionById.set(key, duration);
+                    }
+                }
+            });
+
+            // Give the browser one more turn after load to flush buffered entries.
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            for (const observer of observers) {
+                observer.disconnect();
+            }
+
+            const paintEntries = performance.getEntriesByType('paint') || [];
+            const firstPaint = paintEntries.find((e) => e.name === 'first-paint') || null;
+            const firstContentfulPaint =
+                paintEntries.find((e) => e.name === 'first-contentful-paint') || null;
+
+            if (lcpStart == null) {
+                const lcpEntries = performance.getEntriesByType('largest-contentful-paint') || [];
+                const latestLcp = lcpEntries.length ? lcpEntries[lcpEntries.length - 1] : null;
+                if (latestLcp && typeof latestLcp.startTime === 'number') {
+                    lcpStart = latestLcp.startTime;
+                }
+            }
+
+            // If the observer did not run, fallback to direct collection.
+            if (clsValue === 0) {
+                const clsEntries = performance.getEntriesByType('layout-shift') || [];
+                for (const entry of clsEntries) {
+                    if (!entry?.hadRecentInput && typeof entry.value === 'number' && Number.isFinite(entry.value)) {
+                        clsValue += entry.value;
+                    }
+                }
+            }
+
+            // INP approximation in lab: p98 of max interaction durations by interactionId.
+            // If there are no interactions, this stays null (same as Lighthouse's N/A behavior).
+            let inpCandidate = null;
+            const interactionDurations = Array.from(interactionById.values())
+                .filter((value) => Number.isFinite(value) && value >= 0)
                 .sort((a, b) => a - b);
-            const inpCandidate = inpDurations.length
-                ? inpDurations[Math.max(0, Math.ceil(inpDurations.length * 0.98) - 1)]
-                : null;
-            const entry = performance.getEntriesByType('navigation')[0];
-            if (entry) {
+            if (interactionDurations.length > 0) {
+                const index = Math.max(0, Math.ceil(interactionDurations.length * 0.98) - 1);
+                inpCandidate = interactionDurations[index];
+            }
+
+            if (navEntry) {
                 return JSON.stringify({
-                    navigation_start: Math.round(origin + entry.startTime),
-                    dom_interactive: entry.domInteractive ? Math.round(origin + entry.domInteractive) : null,
-                    dom_content_loaded: entry.domContentLoadedEventEnd ? Math.round(origin + entry.domContentLoadedEventEnd) : null,
-                    load_complete: entry.loadEventEnd ? Math.round(origin + entry.loadEventEnd) : null,
-                    response_start: entry.responseStart ? Math.round(origin + entry.responseStart) : null,
+                    navigation_start: Math.round(origin + navEntry.startTime),
+                    dom_interactive: navEntry.domInteractive
+                        ? Math.round(origin + navEntry.domInteractive)
+                        : null,
+                    dom_content_loaded: navEntry.domContentLoadedEventEnd
+                        ? Math.round(origin + navEntry.domContentLoadedEventEnd)
+                        : null,
+                    load_complete: navEntry.loadEventEnd ? Math.round(origin + navEntry.loadEventEnd) : null,
+                    response_start: navEntry.responseStart ? Math.round(origin + navEntry.responseStart) : null,
                     first_paint: firstPaint ? Math.round(origin + firstPaint.startTime) : null,
-                    first_contentful_paint: firstContentfulPaint ? Math.round(origin + firstContentfulPaint.startTime) : null,
-                    largest_contentful_paint: lcp ? Math.round(origin + lcp.startTime) : null,
-                    cumulative_layout_shift: cls > 0 ? cls : null,
-                    interaction_to_next_paint: inpCandidate !== null ? Math.round(inpCandidate) : null
+                    first_contentful_paint: firstContentfulPaint
+                        ? Math.round(origin + firstContentfulPaint.startTime)
+                        : null,
+                    largest_contentful_paint: lcpStart != null ? Math.round(origin + lcpStart) : null,
+                    cumulative_layout_shift: Number.isFinite(clsValue) ? Number(clsValue.toFixed(4)) : null,
+                    interaction_to_next_paint: inpCandidate != null ? Math.round(inpCandidate) : null
                 });
             }
 
-            // Fallback to legacy performance.timing
+            // Fallback to legacy performance.timing when navigation entry is unavailable.
             const timing = performance.timing;
             return JSON.stringify({
                 navigation_start: timing.navigationStart,
@@ -563,13 +716,13 @@ async fn capture_performance_timing(page: &Page) -> Result<PerformanceTiming> {
                 response_start: timing.responseStart || null,
                 first_paint: firstPaint ? Math.round(origin + firstPaint.startTime) : null,
                 first_contentful_paint: firstContentfulPaint ? Math.round(origin + firstContentfulPaint.startTime) : null,
-                largest_contentful_paint: lcp ? Math.round(origin + lcp.startTime) : null,
-                cumulative_layout_shift: cls > 0 ? cls : null,
-                interaction_to_next_paint: inpCandidate !== null ? Math.round(inpCandidate) : null
+                largest_contentful_paint: lcpStart != null ? Math.round(origin + lcpStart) : null,
+                cumulative_layout_shift: Number.isFinite(clsValue) ? Number(clsValue.toFixed(4)) : null,
+                interaction_to_next_paint: inpCandidate != null ? Math.round(inpCandidate) : null
             });
         })()
     "#;
-    
+
     let cdp_page = page
         .cdp_page()
         .ok_or_else(|| Error::ExtractionFailed("CDP page unavailable".to_string()))?;
@@ -659,7 +812,7 @@ async fn capture_computed_styles(page: &Page) -> Result<Vec<ComputedStyle>> {
             return JSON.stringify(styles.slice(0, 100)); // Limit to 100 elements
         })()
     "#;
-    
+
     let cdp_page = page
         .cdp_page()
         .ok_or_else(|| Error::ExtractionFailed("CDP page unavailable".to_string()))?;
@@ -669,9 +822,9 @@ async fn capture_computed_styles(page: &Page) -> Result<Vec<ComputedStyle>> {
         .await
         .map_err(|e| Error::ExtractionFailed(format!("Computed styles evaluation failed: {e}")))?;
 
-    let json_str = result
-        .into_value::<String>()
-        .map_err(|e| Error::ExtractionFailed(format!("Computed styles result decode failed: {e}")))?;
+    let json_str = result.into_value::<String>().map_err(|e| {
+        Error::ExtractionFailed(format!("Computed styles result decode failed: {e}"))
+    })?;
 
     serde_json::from_str::<Vec<ComputedStyle>>(&json_str)
         .map_err(|e| Error::ExtractionFailed(format!("Computed styles JSON parse failed: {e}")))
@@ -705,7 +858,7 @@ mod tests {
             </html>
         "#;
 
-        let assets = extract_referenced_assets(html, "https://example.com/page");
+        let (assets, _favicon) = extract_referenced_assets(html, "https://example.com/page");
 
         assert!(assets
             .javascript
@@ -740,9 +893,12 @@ mod tests {
             </html>
         "#;
 
-        let assets = extract_referenced_assets(html, "https://example.com");
+        let (assets, _favicon) = extract_referenced_assets(html, "https://example.com");
 
         assert_eq!(assets.javascript.len(), 1);
-        assert_eq!(assets.media, vec!["https://example.com/img/one.png".to_string()]);
+        assert_eq!(
+            assets.media,
+            vec!["https://example.com/img/one.png".to_string()]
+        );
     }
 }
