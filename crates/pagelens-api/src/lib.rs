@@ -4,7 +4,7 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use pagelens_app::{AnalyseUrlInput, AppService, EditRunInput, FaviconAnalyzeInput};
+use pagelens_app::{AnalyseUrlInput, AppService, EditRunInput, FaviconAnalyzeInput, PwaAnalyzeInput};
 use pagelens_logging::{error, info, warn};
 use serde::Deserialize;
 use std::convert::Infallible;
@@ -40,6 +40,11 @@ struct FaviconAnalyzeRequest {
     url: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct PwaAnalyzeRequest {
+    url: String,
+}
+
 pub async fn serve(config: ApiConfig) -> Result<(), String> {
     pagelens_logging::init("pagelens-api");
     let service = service_from_db_path(config.db_path)?;
@@ -71,6 +76,7 @@ pub fn router(service: AppService) -> Router {
         .route("/api/runs/{run_id}/events", get(run_events))
         .route("/api/history", get(list_history))
         .route("/api/tools/favicon", post(analyze_favicon))
+        .route("/api/tools/pwa", post(analyze_pwa))
         .nest_service("/api/assets", ServeDir::new(assets_dir))
         .with_state(state)
         .layer(TraceLayer::new_for_http())
@@ -181,6 +187,19 @@ async fn analyze_favicon(
     let response = state
         .service
         .analyze_favicon(FaviconAnalyzeInput { url: input.url })
+        .await
+        .map_err(ApiError::from_app)?;
+    Ok(Json(serde_json::json!(response)))
+}
+
+async fn analyze_pwa(
+    State(state): State<ApiState>,
+    Json(input): Json<PwaAnalyzeRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    info!(url = %input.url, "Received PWA analysis request");
+    let response = state
+        .service
+        .analyze_pwa(PwaAnalyzeInput { url: input.url })
         .await
         .map_err(ApiError::from_app)?;
     Ok(Json(serde_json::json!(response)))

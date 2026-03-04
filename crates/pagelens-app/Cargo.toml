@@ -13,6 +13,7 @@ pagelens-db = { workspace = true }
 pagelens-logging = { workspace = true }
 reqwest = { workspace = true }
 scraper = "0.22"
+image = "0.25"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

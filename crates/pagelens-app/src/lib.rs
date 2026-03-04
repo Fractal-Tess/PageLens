@@ -13,6 +13,7 @@ use pagelens_db::{
     HistoryListItem, UpdateAnalysisRun,
 };
 use prelude::*;
+use image::DynamicImage;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -253,6 +254,66 @@ pub struct FaviconAnalyzeResponse {
     pub resolved_page_url: String,
     pub default_favicon_url: String,
     pub candidates: Vec<FaviconCandidate>,
+    pub warnings: Vec<String>,
+    pub has_web_app_manifest: bool,
+    pub has_touch_icon: bool,
+    pub touch_web_app_title: Option<String>,
+    pub has_svg_favicon: bool,
+    pub has_desktop_png_favicon: bool,
+    pub ico_declared: bool,
+    pub ico_found: bool,
+    pub ico_sizes: Vec<String>,
+    pub ico_extra_sizes: Vec<String>,
+    pub ico_missing_sizes: Vec<String>,
+    pub audit_messages: Vec<String>,
+    pub candidate_reports: Vec<FaviconCandidateReport>,
+    pub global_recommendations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaviconCandidateReport {
+    pub url: String,
+    pub rel: String,
+    pub source: String,
+    pub mime_type: Option<String>,
+    pub declared_sizes: Option<String>,
+    pub format: Option<String>,
+    pub file_size_bytes: Option<u64>,
+    pub detected_dimensions: Vec<String>,
+    pub contrast_on_light: Option<f64>,
+    pub contrast_on_dark: Option<f64>,
+    pub issues: Vec<String>,
+    pub recommendations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PwaAnalyzeInput {
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PwaManifestSummary {
+    pub manifest_url: String,
+    pub name: Option<String>,
+    pub short_name: Option<String>,
+    pub start_url: Option<String>,
+    pub display: Option<String>,
+    pub theme_color: Option<String>,
+    pub background_color: Option<String>,
+    pub icon_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PwaAnalyzeResponse {
+    pub input_url: String,
+    pub resolved_page_url: String,
+    pub has_manifest: bool,
+    pub manifest: Option<PwaManifestSummary>,
+    pub has_service_worker_registration: bool,
+    pub has_theme_color_meta: bool,
+    pub apple_touch_icon_count: usize,
+    pub mask_icon_count: usize,
+    pub installability_score: u8,
     pub warnings: Vec<String>,
 }
 
@@ -753,59 +814,106 @@ impl AppService {
             .map_err(|err| Error::Message(format!("Failed to resolve default favicon URL: {err}")))?
             .to_string();
 
-        let document = Html::parse_document(&html);
-        let selector = Selector::parse("link")
-            .map_err(|err| Error::Message(format!("Failed to parse selector: {err}")))?;
+        let (mut warnings, mut candidates, has_web_app_manifest, has_touch_icon, ico_declared_url, touch_web_app_title) = {
+            let document = Html::parse_document(&html);
+            let link_selector = Selector::parse("link")
+                .map_err(|err| Error::Message(format!("Failed to parse selector: {err}")))?;
+            let touch_title_selector = Selector::parse("meta[name='apple-mobile-web-app-title']")
+                .map_err(|err| Error::Message(format!("Failed to parse selector: {err}")))?;
 
-        let mut warnings = Vec::new();
-        let mut seen = HashSet::new();
-        let mut candidates = Vec::new();
+            let mut warnings = Vec::new();
+            let mut seen = HashSet::new();
+            let mut candidates = Vec::new();
+            let mut has_web_app_manifest = false;
+            let mut has_touch_icon = false;
+            let mut ico_declared_url: Option<String> = None;
 
-        for element in document.select(&selector) {
-            let Some(rel_raw) = element.value().attr("rel") else {
-                continue;
-            };
+            for element in document.select(&link_selector) {
+                let Some(rel_raw) = element.value().attr("rel") else {
+                    continue;
+                };
 
-            let rel_tokens: Vec<String> = rel_raw
-                .split_ascii_whitespace()
-                .map(|token| token.trim().to_ascii_lowercase())
-                .filter(|token| !token.is_empty())
-                .collect();
-            let is_icon = rel_tokens
-                .iter()
-                .any(|token| token == "icon" || token == "shortcut");
-            if !is_icon {
-                continue;
-            }
+                let rel_tokens: Vec<String> = rel_raw
+                    .split_ascii_whitespace()
+                    .map(|token| token.trim().to_ascii_lowercase())
+                    .filter(|token| !token.is_empty())
+                    .collect();
 
-            let Some(href) = element.value().attr("href") else {
-                warnings.push("Found icon rel without href".to_string());
-                continue;
-            };
+                if rel_tokens.iter().any(|token| token == "manifest") {
+                    has_web_app_manifest = true;
+                }
 
-            let resolved_icon_url = match resolved_page_url.join(href) {
-                Ok(url) => url,
-                Err(err) => {
-                    warnings.push(format!("Could not resolve icon href '{href}': {err}"));
+                if rel_tokens.iter().any(|token| token == "apple-touch-icon") {
+                    has_touch_icon = true;
+                }
+
+                let is_icon = rel_tokens
+                    .iter()
+                    .any(|token| token == "icon" || token == "shortcut");
+                if !is_icon {
                     continue;
                 }
-            };
 
-            let icon_url = resolved_icon_url.to_string();
-            if !seen.insert(icon_url.clone()) {
-                continue;
+                let Some(href) = element.value().attr("href") else {
+                    warnings.push("Found icon rel without href".to_string());
+                    continue;
+                };
+
+                let resolved_icon_url = match resolved_page_url.join(href) {
+                    Ok(url) => url,
+                    Err(err) => {
+                        warnings.push(format!("Could not resolve icon href '{href}': {err}"));
+                        continue;
+                    }
+                };
+
+                let icon_url = resolved_icon_url.to_string();
+                if !seen.insert(icon_url.clone()) {
+                    continue;
+                }
+
+                let mime_type = element.value().attr("type").map(str::to_string);
+                if ico_declared_url.is_none()
+                    && (icon_url.to_ascii_lowercase().ends_with(".ico")
+                        || mime_type
+                            .as_deref()
+                            .unwrap_or_default()
+                            .to_ascii_lowercase()
+                            .contains("icon"))
+                {
+                    ico_declared_url = Some(icon_url.clone());
+                }
+
+                candidates.push(FaviconCandidate {
+                    url: icon_url,
+                    rel: rel_raw.to_string(),
+                    sizes: element.value().attr("sizes").map(str::to_string),
+                    mime_type,
+                    source: "html_link".to_string(),
+                });
             }
 
-            candidates.push(FaviconCandidate {
-                url: icon_url,
-                rel: rel_raw.to_string(),
-                sizes: element.value().attr("sizes").map(str::to_string),
-                mime_type: element.value().attr("type").map(str::to_string),
-                source: "html_link".to_string(),
-            });
-        }
+            let touch_web_app_title = document
+                .select(&touch_title_selector)
+                .find_map(|node| node.value().attr("content"))
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
 
-        if seen.insert(default_favicon_url.clone()) {
+            (
+                warnings,
+                candidates,
+                has_web_app_manifest,
+                has_touch_icon,
+                ico_declared_url,
+                touch_web_app_title,
+            )
+        };
+
+        if !candidates
+            .iter()
+            .any(|candidate| candidate.url == default_favicon_url)
+        {
             candidates.push(FaviconCandidate {
                 url: default_favicon_url.clone(),
                 rel: "icon".to_string(),
@@ -817,6 +925,261 @@ impl AppService {
 
         if candidates.is_empty() {
             warnings.push("No favicon candidates discovered".to_string());
+        }
+
+        let has_svg_favicon = candidates.iter().any(|candidate| {
+            candidate
+                .mime_type
+                .as_deref()
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+                .contains("svg")
+                || candidate.url.to_ascii_lowercase().contains(".svg")
+        });
+
+        let has_desktop_png_favicon = candidates.iter().any(|candidate| {
+            let is_png = candidate
+                .mime_type
+                .as_deref()
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+                .contains("png")
+                || candidate.url.to_ascii_lowercase().contains(".png");
+            let is_touch = candidate.rel.to_ascii_lowercase().contains("apple-touch-icon");
+            is_png && !is_touch
+        });
+
+        let ico_declared = ico_declared_url.is_some();
+        let ico_target_url = ico_declared_url.unwrap_or_else(|| default_favicon_url.clone());
+        let mut ico_found = false;
+        let mut ico_sizes = Vec::new();
+
+        match client.get(&ico_target_url).send().await {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    ico_found = true;
+                    match resp.bytes().await {
+                        Ok(bytes) => {
+                            ico_sizes = parse_ico_sizes(bytes.as_ref())
+                                .into_iter()
+                                .map(|(w, h)| format!("{w}x{h}"))
+                                .collect();
+                        }
+                        Err(err) => warnings.push(format!("Failed to read ICO bytes: {err}")),
+                    }
+                }
+            }
+            Err(err) => warnings.push(format!("Failed to fetch ICO favicon: {err}")),
+        }
+
+        let required_ico_sizes = ["48x48", "32x32", "16x16"];
+        let ico_missing_sizes: Vec<String> = required_ico_sizes
+            .iter()
+            .filter(|required| !ico_sizes.iter().any(|size| size == **required))
+            .map(|required| (*required).to_string())
+            .collect();
+        let ico_extra_sizes: Vec<String> = ico_sizes
+            .iter()
+            .filter(|size| !required_ico_sizes.iter().any(|required| required == size))
+            .cloned()
+            .collect();
+
+        let mut candidate_reports = Vec::new();
+        for candidate in &candidates {
+            let mut issues = Vec::new();
+            let mut recommendations = Vec::new();
+            let detected_format = detect_icon_format(candidate.mime_type.as_deref(), &candidate.url);
+            let mut file_size_bytes = None;
+            let mut detected_dimensions = Vec::new();
+            let mut contrast_on_light = None;
+            let mut contrast_on_dark = None;
+
+            match client.get(&candidate.url).send().await {
+                Ok(resp) => {
+                    if let Ok(ok_resp) = resp.error_for_status() {
+                        match ok_resp.bytes().await {
+                            Ok(bytes) => {
+                                let bytes_vec = bytes.to_vec();
+                                file_size_bytes = Some(bytes_vec.len() as u64);
+                                if let Some(size) = file_size_bytes {
+                                    if size > 200_000 {
+                                        issues.push(format!(
+                                            "Icon file size is high ({:.1} KB)",
+                                            size as f64 / 1024.0
+                                        ));
+                                        recommendations.push(
+                                            "Compress icon assets below ~200 KB for faster first paint"
+                                                .to_string(),
+                                        );
+                                    }
+                                }
+
+                                if detected_format.as_deref() == Some("ico") {
+                                    let ico_dims = parse_ico_sizes(&bytes_vec);
+                                    detected_dimensions = ico_dims
+                                        .iter()
+                                        .map(|(w, h)| format!("{w}x{h}"))
+                                        .collect();
+                                } else if detected_format.as_deref() == Some("svg") {
+                                    recommendations.push(
+                                        "Verify SVG contrast manually for both light and dark surfaces"
+                                            .to_string(),
+                                    );
+                                } else if let Ok(image) = image::load_from_memory(&bytes_vec) {
+                                    detected_dimensions = vec![format!(
+                                        "{}x{}",
+                                        image.width(),
+                                        image.height()
+                                    )];
+                                    let (light_ratio, dark_ratio) = estimate_icon_contrast(&image);
+                                    contrast_on_light = Some(light_ratio);
+                                    contrast_on_dark = Some(dark_ratio);
+                                    if light_ratio < 2.2 {
+                                        issues.push(format!(
+                                            "Low contrast on light background ({light_ratio:.2}:1)"
+                                        ));
+                                        recommendations.push(
+                                            "Increase icon edge contrast for light themes"
+                                                .to_string(),
+                                        );
+                                    }
+                                    if dark_ratio < 2.2 {
+                                        issues.push(format!(
+                                            "Low contrast on dark background ({dark_ratio:.2}:1)"
+                                        ));
+                                        recommendations.push(
+                                            "Increase icon edge contrast for dark themes"
+                                                .to_string(),
+                                        );
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                issues.push(format!("Failed to read icon bytes: {err}"));
+                            }
+                        }
+                    } else {
+                        issues.push("Icon URL returned non-success status".to_string());
+                    }
+                }
+                Err(err) => {
+                    issues.push(format!("Icon URL fetch failed: {err}"));
+                }
+            }
+
+            if detected_format.is_none() {
+                recommendations.push("Declare an explicit icon MIME type and extension".to_string());
+            }
+
+            if detected_format.as_deref() == Some("svg") {
+                recommendations.push(
+                    "Provide a PNG fallback for environments with limited SVG favicon support"
+                        .to_string(),
+                );
+            }
+
+            candidate_reports.push(FaviconCandidateReport {
+                url: candidate.url.clone(),
+                rel: candidate.rel.clone(),
+                source: candidate.source.clone(),
+                mime_type: candidate.mime_type.clone(),
+                declared_sizes: candidate.sizes.clone(),
+                format: detected_format,
+                file_size_bytes,
+                detected_dimensions,
+                contrast_on_light,
+                contrast_on_dark,
+                issues,
+                recommendations,
+            });
+        }
+
+        let mut audit_messages = Vec::new();
+        audit_messages.push(if has_svg_favicon {
+            "SVG favicon found".to_string()
+        } else {
+            "There is no SVG favicon".to_string()
+        });
+        audit_messages.push(if has_desktop_png_favicon {
+            "Desktop PNG favicon found".to_string()
+        } else {
+            "There is no desktop PNG favicon".to_string()
+        });
+        audit_messages.push(if ico_declared {
+            "The ICO favicon is declared".to_string()
+        } else {
+            "The ICO favicon is not declared".to_string()
+        });
+        audit_messages.push(if ico_found {
+            "ICO favicon found".to_string()
+        } else {
+            "ICO favicon not found".to_string()
+        });
+
+        if ico_extra_sizes.is_empty() {
+            audit_messages.push("Extra sizes found in ICO favicon: none".to_string());
+        } else {
+            audit_messages.push(format!(
+                "Extra sizes found in ICO favicon: {}",
+                ico_extra_sizes.join(", ")
+            ));
+        }
+
+        if ico_missing_sizes.is_empty() {
+            audit_messages.push("Missing sizes in ICO favicon: none".to_string());
+        } else {
+            audit_messages.push(format!(
+                "Missing sizes in ICO favicon: {}",
+                ico_missing_sizes.join(", ")
+            ));
+        }
+
+        audit_messages.push(if touch_web_app_title.is_some() {
+            "Touch web app title declared".to_string()
+        } else {
+            "No touch web app title declared".to_string()
+        });
+        audit_messages.push(if has_touch_icon {
+            "Touch icon declared".to_string()
+        } else {
+            "No touch icon declared".to_string()
+        });
+        audit_messages.push(if has_web_app_manifest {
+            "Web app manifest declared".to_string()
+        } else {
+            "No web app manifest".to_string()
+        });
+
+        let mut global_recommendations = Vec::new();
+        if !has_svg_favicon {
+            global_recommendations
+                .push("Add an SVG favicon for sharper rendering on high-density displays".to_string());
+        }
+        if !has_desktop_png_favicon {
+            global_recommendations.push(
+                "Add a desktop PNG favicon (at minimum 32x32, ideally 48x48)".to_string(),
+            );
+        }
+        if !has_touch_icon {
+            global_recommendations
+                .push("Declare an apple-touch-icon for iOS home screen support".to_string());
+        }
+        if touch_web_app_title.is_none() {
+            global_recommendations.push(
+                "Add meta name='apple-mobile-web-app-title' for touch web app naming"
+                    .to_string(),
+            );
+        }
+        if !has_web_app_manifest {
+            global_recommendations.push(
+                "Add a web app manifest with at least 192x192 and 512x512 icons".to_string(),
+            );
+        }
+        if !ico_missing_sizes.is_empty() {
+            global_recommendations.push(format!(
+                "Include missing ICO sizes: {}",
+                ico_missing_sizes.join(", ")
+            ));
         }
 
         info!(
@@ -832,6 +1195,204 @@ impl AppService {
             resolved_page_url: resolved_page_url.to_string(),
             default_favicon_url,
             candidates,
+            warnings,
+            has_web_app_manifest,
+            has_touch_icon,
+            touch_web_app_title,
+            has_svg_favicon,
+            has_desktop_png_favicon,
+            ico_declared,
+            ico_found,
+            ico_sizes,
+            ico_extra_sizes,
+            ico_missing_sizes,
+            audit_messages,
+            candidate_reports,
+            global_recommendations,
+        })
+    }
+
+    pub async fn analyze_pwa(&self, input: PwaAnalyzeInput) -> Result<PwaAnalyzeResponse> {
+        let input_url = input.url.trim();
+        if input_url.is_empty() {
+            return Err(Error::Message("URL is required".to_string()));
+        }
+
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::limited(10))
+            .build()
+            .map_err(|err| Error::Message(format!("Failed to build HTTP client: {err}")))?;
+
+        let response = client
+            .get(input_url)
+            .send()
+            .await
+            .map_err(|err| Error::Message(format!("Failed to fetch URL: {err}")))?
+            .error_for_status()
+            .map_err(|err| Error::Message(format!("Page request failed: {err}")))?;
+
+        let resolved_page_url = response.url().clone();
+        let html = response
+            .text()
+            .await
+            .map_err(|err| Error::Message(format!("Failed to read page body: {err}")))?;
+
+        let (mut warnings, has_theme_color_meta, apple_touch_icon_count, mask_icon_count, manifest_url) = {
+            let document = Html::parse_document(&html);
+            let link_selector = Selector::parse("link")
+                .map_err(|err| Error::Message(format!("Failed to parse selector: {err}")))?;
+            let theme_color_selector = Selector::parse("meta[name='theme-color']")
+                .map_err(|err| Error::Message(format!("Failed to parse selector: {err}")))?;
+
+            let mut warnings = Vec::new();
+            let mut apple_touch_icon_count = 0usize;
+            let mut mask_icon_count = 0usize;
+            let mut manifest_url: Option<reqwest::Url> = None;
+
+            for element in document.select(&link_selector) {
+                let Some(rel_raw) = element.value().attr("rel") else {
+                    continue;
+                };
+
+                let rel_tokens: Vec<String> = rel_raw
+                    .split_ascii_whitespace()
+                    .map(|token| token.trim().to_ascii_lowercase())
+                    .filter(|token| !token.is_empty())
+                    .collect();
+
+                if rel_tokens.iter().any(|token| token == "apple-touch-icon") {
+                    apple_touch_icon_count += 1;
+                }
+                if rel_tokens.iter().any(|token| token == "mask-icon") {
+                    mask_icon_count += 1;
+                }
+
+                if !rel_tokens.iter().any(|token| token == "manifest") || manifest_url.is_some() {
+                    continue;
+                }
+
+                let Some(href) = element.value().attr("href") else {
+                    warnings.push("Manifest link is missing href".to_string());
+                    continue;
+                };
+
+                let resolved_manifest_url = match resolved_page_url.join(href) {
+                    Ok(url) => url,
+                    Err(err) => {
+                        warnings.push(format!("Could not resolve manifest href '{href}': {err}"));
+                        continue;
+                    }
+                };
+
+                manifest_url = Some(resolved_manifest_url);
+            }
+
+            let has_theme_color_meta = document.select(&theme_color_selector).next().is_some();
+
+            (
+                warnings,
+                has_theme_color_meta,
+                apple_touch_icon_count,
+                mask_icon_count,
+                manifest_url,
+            )
+        };
+
+        let mut has_manifest = false;
+        let mut manifest: Option<PwaManifestSummary> = None;
+
+        if let Some(manifest_url) = manifest_url {
+            has_manifest = true;
+            match client.get(manifest_url.clone()).send().await {
+                Ok(manifest_response) => match manifest_response.error_for_status() {
+                    Ok(ok_response) => match ok_response.text().await {
+                        Ok(manifest_body) => match serde_json::from_str::<serde_json::Value>(&manifest_body) {
+                            Ok(value) => {
+                                let icons = value
+                                    .get("icons")
+                                    .and_then(|icons| icons.as_array())
+                                    .cloned()
+                                    .unwrap_or_default();
+                                manifest = Some(PwaManifestSummary {
+                                    manifest_url: manifest_url.to_string(),
+                                    name: value
+                                        .get("name")
+                                        .and_then(|entry| entry.as_str())
+                                        .map(str::to_string),
+                                    short_name: value
+                                        .get("short_name")
+                                        .and_then(|entry| entry.as_str())
+                                        .map(str::to_string),
+                                    start_url: value
+                                        .get("start_url")
+                                        .and_then(|entry| entry.as_str())
+                                        .map(str::to_string),
+                                    display: value
+                                        .get("display")
+                                        .and_then(|entry| entry.as_str())
+                                        .map(str::to_string),
+                                    theme_color: value
+                                        .get("theme_color")
+                                        .and_then(|entry| entry.as_str())
+                                        .map(str::to_string),
+                                    background_color: value
+                                        .get("background_color")
+                                        .and_then(|entry| entry.as_str())
+                                        .map(str::to_string),
+                                    icon_count: icons.len(),
+                                });
+                            }
+                            Err(err) => {
+                                warnings.push(format!("Manifest JSON parse failed: {err}"));
+                            }
+                        },
+                        Err(err) => warnings.push(format!("Failed reading manifest body: {err}")),
+                    },
+                    Err(err) => warnings.push(format!("Manifest request failed: {err}")),
+                },
+                Err(err) => warnings.push(format!("Manifest fetch failed: {err}")),
+            }
+        }
+
+        let has_service_worker_registration =
+            html.contains("navigator.serviceWorker") || html.contains("serviceWorker.register");
+
+        let mut score = 0u8;
+        if has_manifest {
+            score += 30;
+        }
+        if manifest.as_ref().map(|entry| entry.icon_count > 0).unwrap_or(false) {
+            score += 20;
+        }
+        if has_service_worker_registration {
+            score += 30;
+        }
+        if has_theme_color_meta {
+            score += 10;
+        }
+        if apple_touch_icon_count > 0 {
+            score += 10;
+        }
+
+        info!(
+            input_url = %input_url,
+            resolved_page_url = %resolved_page_url,
+            has_manifest,
+            has_service_worker_registration,
+            installability_score = score,
+            "PWA analysis completed"
+        );
+
+        Ok(PwaAnalyzeResponse {
+            input_url: input_url.to_string(),
+            resolved_page_url: resolved_page_url.to_string(),
+            has_manifest,
+            manifest,
+            has_service_worker_registration,
+            has_theme_color_meta,
+            apple_touch_icon_count,
+            mask_icon_count,
+            installability_score: score,
             warnings,
         })
     }
@@ -1791,4 +2352,103 @@ fn extension_from_content_type_or_url(content_type: Option<&str>, url: &str) -> 
         .filter(|ext| ext.len() <= 5 && ext.chars().all(|c| c.is_alphanumeric()))
         .map(|ext| format!(".{}", ext))
         .unwrap_or_default()
+}
+
+fn detect_icon_format(mime_type: Option<&str>, url: &str) -> Option<String> {
+    let mime = mime_type.unwrap_or_default().to_ascii_lowercase();
+    let url_lower = url.to_ascii_lowercase();
+
+    if mime.contains("svg") || url_lower.ends_with(".svg") {
+        return Some("svg".to_string());
+    }
+    if mime.contains("png") || url_lower.ends_with(".png") {
+        return Some("png".to_string());
+    }
+    if mime.contains("icon") || url_lower.ends_with(".ico") {
+        return Some("ico".to_string());
+    }
+    if mime.contains("webp") || url_lower.ends_with(".webp") {
+        return Some("webp".to_string());
+    }
+    if mime.contains("jpeg") || mime.contains("jpg") || url_lower.ends_with(".jpg") || url_lower.ends_with(".jpeg") {
+        return Some("jpeg".to_string());
+    }
+
+    None
+}
+
+fn estimate_icon_contrast(image: &DynamicImage) -> (f64, f64) {
+    let rgba = image.to_rgba8();
+    let mut weighted_luminance_sum = 0.0f64;
+    let mut alpha_sum = 0.0f64;
+
+    for pixel in rgba.pixels() {
+        let [r, g, b, a] = pixel.0;
+        let alpha = f64::from(a) / 255.0;
+        if alpha <= 0.0 {
+            continue;
+        }
+        let r_lin = srgb_to_linear(f64::from(r) / 255.0);
+        let g_lin = srgb_to_linear(f64::from(g) / 255.0);
+        let b_lin = srgb_to_linear(f64::from(b) / 255.0);
+        let luminance = 0.2126 * r_lin + 0.7152 * g_lin + 0.0722 * b_lin;
+        weighted_luminance_sum += luminance * alpha;
+        alpha_sum += alpha;
+    }
+
+    let avg_luminance = if alpha_sum > 0.0 {
+        weighted_luminance_sum / alpha_sum
+    } else {
+        0.5
+    };
+
+    let contrast_on_light = (1.0 + 0.05) / (avg_luminance + 0.05);
+    let contrast_on_dark = (avg_luminance + 0.05) / 0.05;
+    (contrast_on_light, contrast_on_dark)
+}
+
+fn srgb_to_linear(channel: f64) -> f64 {
+    if channel <= 0.04045 {
+        channel / 12.92
+    } else {
+        ((channel + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn parse_ico_sizes(bytes: &[u8]) -> Vec<(u16, u16)> {
+    if bytes.len() < 6 {
+        return Vec::new();
+    }
+
+    let reserved = u16::from_le_bytes([bytes[0], bytes[1]]);
+    let icon_type = u16::from_le_bytes([bytes[2], bytes[3]]);
+    let count = u16::from_le_bytes([bytes[4], bytes[5]]) as usize;
+    if reserved != 0 || icon_type != 1 {
+        return Vec::new();
+    }
+
+    let mut sizes = Vec::new();
+    for i in 0..count {
+        let offset = 6 + i * 16;
+        if bytes.len() < offset + 16 {
+            break;
+        }
+
+        let width = if bytes[offset] == 0 {
+            256
+        } else {
+            bytes[offset] as u16
+        };
+        let height = if bytes[offset + 1] == 0 {
+            256
+        } else {
+            bytes[offset + 1] as u16
+        };
+
+        sizes.push((width, height));
+    }
+
+    sizes.sort_unstable();
+    sizes.dedup();
+    sizes
 }
