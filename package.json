@@ -20,13 +20,13 @@
   ],
   "scripts": {
     "build": "turbo run build",
-    "build:dowry": "bun run --cwd apps/dowry build",
+    "build:tauri": "bun run --cwd apps/tauri build",
     "build:test-apps": "turbo run build --filter='./test-apps/*'",
-    "dev": "bun run --cwd apps/dowry dev",
+    "dev": "bun run --cwd apps/tauri dev",
     "format": "prettier --write .",
-    "check": "bun run --cwd apps/dowry check",
-    "svelte:build": "bun run --cwd apps/dowry svelte:build",
-    "svelte:dev": "bun run --cwd apps/dowry svelte:dev",
+    "check": "bun run --cwd apps/tauri check",
+    "svelte:build": "bun run --cwd apps/tauri svelte:build",
+    "svelte:dev": "bun run --cwd apps/tauri svelte:dev",
     "start-apps": "turbo run start --filter='./test-apps/*' --ui=tui",
     "start-test-apps": "bun run start-apps"
   },

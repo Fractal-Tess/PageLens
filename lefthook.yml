@@ -3,8 +3,8 @@ pre-commit:
   commands:
     svelte-check:
       glob: '*.{svelte,ts}'
-      run: bunx svelte-check --tsconfig ./apps/dowry/tsconfig.json
+      run: bunx svelte-check --tsconfig ./apps/tauri/tsconfig.json
     cargo-check:
       glob: '*.rs'
-      root: apps/dowry/src-tauri
+      root: apps/tauri/src-tauri
       run: cargo check
