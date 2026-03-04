@@ -1,28 +1,58 @@
 mod error;
 mod prelude;
 
+#[cfg(not(debug_assertions))]
+use axum::http::header;
+#[cfg(not(debug_assertions))]
+use axum::http::{Method, StatusCode, Uri};
+#[cfg(not(debug_assertions))]
+use axum::response::{IntoResponse, Response};
 use clap::{ArgAction, Parser, ValueEnum};
+#[cfg(not(debug_assertions))]
+use include_dir::{include_dir, Dir};
 use pagelens_core::browser::Browser;
 use pagelens_core::seo::SeoAnalyzer;
 use pagelens_core::site_files::SiteFilesAnalyzer;
 use pagelens_core::snapshot::{SnapshotExt, SnapshotOptions};
-use reqwest::header::{CONTENT_LENGTH, CONTENT_RANGE, HeaderMap, HeaderName, HeaderValue, RANGE};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_LENGTH, CONTENT_RANGE, RANGE};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+#[cfg(not(debug_assertions))]
+use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr};
+use std::path::PathBuf;
 use std::time::Duration;
 
+#[cfg(not(debug_assertions))]
+static EMBEDDED_WEB_DIST: Dir<'_> = include_dir!("$OUT_DIR/pagelens-web");
+
 #[derive(Parser)]
-#[command(name = "pagelens", about = "Audit web pages for contrast, SEO, accessibility, and performance")]
+#[command(
+    name = "pagelens",
+    about = "Audit web pages for contrast, SEO, accessibility, and performance"
+)]
 #[command(version)]
 struct Cli {
-    /// URL to analyze
-    url: String,
-    
+    #[arg(long, default_value_t = false)]
+    serve: bool,
+
+    #[arg(long, default_value = "127.0.0.1", requires = "serve")]
+    host: String,
+
+    #[arg(long, default_value_t = 8787, requires = "serve")]
+    port: u16,
+
+    #[arg(long, requires = "serve")]
+    db_path: Option<String>,
+
+    #[arg(required_unless_present = "serve")]
+    url: Option<String>,
+
     /// Output results as JSON
     #[arg(long)]
     json: bool,
-    
+
     /// Run only SEO checks
     #[arg(long)]
     seo: bool,
@@ -77,6 +107,39 @@ enum AnalysisMode {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+
+    if cli.serve {
+        let host = match cli.host.parse::<IpAddr>() {
+            Ok(host) => host,
+            Err(err) => {
+                eprintln!("Error: invalid --host '{}': {}", cli.host, err);
+                std::process::exit(1);
+            }
+        };
+
+        let db_path = cli
+            .db_path
+            .as_ref()
+            .map(PathBuf::from)
+            .unwrap_or_else(default_server_db_path);
+
+        open_browser_for_server(host, cli.port);
+
+        if let Err(err) = run_server(host, cli.port, db_path).await {
+            eprintln!("Error: {err}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    let url = match cli.url.as_deref() {
+        Some(url) => url,
+        None => {
+            eprintln!("Error: URL is required unless --serve is set");
+            std::process::exit(1);
+        }
+    };
+
     let request_headers = match parse_headers(&cli.headers) {
         Ok(headers) => headers,
         Err(err) => {
@@ -86,13 +149,13 @@ async fn main() {
     };
 
     // Validate URL
-    if !cli.url.starts_with("http://") && !cli.url.starts_with("https://") {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
         eprintln!("Error: URL must start with http:// or https://");
         std::process::exit(1);
     }
 
     if let Err(e) = run_audit(
-        &cli.url,
+        url,
         cli.json,
         cli.seo,
         cli.mode,
@@ -109,6 +172,108 @@ async fn main() {
         eprintln!("Error: {e}");
         std::process::exit(1);
     }
+}
+
+fn default_server_db_path() -> PathBuf {
+    PathBuf::from(".pagelens/pagelens.db")
+}
+
+fn open_browser_for_server(host: IpAddr, port: u16) {
+    let open_host = if host.is_unspecified() {
+        IpAddr::V4(Ipv4Addr::LOCALHOST)
+    } else {
+        host
+    };
+    let url = format!("http://{}:{}/", open_host, port);
+    if let Err(err) = webbrowser::open(&url) {
+        eprintln!("Warning: failed to open browser automatically: {err}");
+    }
+}
+
+async fn run_server(host: IpAddr, port: u16, db_path: PathBuf) -> Result<(), String> {
+    #[cfg(debug_assertions)]
+    {
+        let config = pagelens_api::ApiConfig {
+            host,
+            port,
+            db_path,
+        };
+        return pagelens_api::serve(config).await;
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        let service = pagelens_api::service_from_db_path(db_path)?;
+        let api_router = pagelens_api::router(service);
+        let app = api_router.fallback(serve_embedded_web);
+
+        let addr = SocketAddr::new(host, port);
+        let listener = tokio::net::TcpListener::bind(addr)
+            .await
+            .map_err(|e| e.to_string())?;
+        return axum::serve(listener, app).await.map_err(|e| e.to_string());
+    }
+}
+
+#[cfg(not(debug_assertions))]
+async fn serve_embedded_web(method: Method, uri: Uri) -> Response {
+    if method != Method::GET && method != Method::HEAD {
+        return (StatusCode::METHOD_NOT_ALLOWED, "Method not allowed").into_response();
+    }
+    serve_embedded_asset(uri.path())
+}
+
+#[cfg(not(debug_assertions))]
+fn serve_embedded_asset(path: &str) -> Response {
+    let requested = {
+        let value = path.trim_start_matches('/');
+        if value.is_empty() {
+            "index.html"
+        } else {
+            value
+        }
+    };
+
+    if let Some(file) = EMBEDDED_WEB_DIST.get_file(requested) {
+        return response_from_embed_file(file.contents(), requested);
+    }
+
+    let looks_like_asset = requested
+        .rsplit('/')
+        .next()
+        .is_some_and(|segment| segment.contains('.'));
+    if !looks_like_asset {
+        if let Some(file) = EMBEDDED_WEB_DIST.get_file("index.html") {
+            return response_from_embed_file(file.contents(), "index.html");
+        }
+    }
+
+    (StatusCode::NOT_FOUND, "Not found").into_response()
+}
+
+#[cfg(not(debug_assertions))]
+fn response_from_embed_file(contents: &'static [u8], path: &str) -> Response {
+    let content_type = match path.rsplit('.').next().unwrap_or_default() {
+        "html" => "text/html; charset=utf-8",
+        "js" | "mjs" => "application/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "json" => "application/json; charset=utf-8",
+        "wasm" => "application/wasm",
+        "map" => "application/json; charset=utf-8",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "avif" => "image/avif",
+        "ico" => "image/x-icon",
+        "woff" => "font/woff",
+        "woff2" => "font/woff2",
+        "txt" => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    };
+
+    ([(header::CONTENT_TYPE, content_type)], contents).into_response()
 }
 
 async fn run_audit(
@@ -147,15 +312,16 @@ async fn run_audit(
     if !json_output {
         println!("⏳ Launching browser...");
     }
-    
-    let browser = Browser::launch().await
+
+    let browser = Browser::launch()
+        .await
         .map_err(|e| format!("Failed to launch browser: {e}"))?;
 
     // Navigate to URL
     if !json_output {
         println!("⏳ Navigating to page...");
     }
-    
+
     let page = if request_headers.is_empty() {
         browser
             .navigate(url)
@@ -172,11 +338,13 @@ async fn run_audit(
     if !json_output {
         println!("⏳ Capturing page snapshot...");
     }
-    
+
     let mut snapshot_options = SnapshotOptions::default();
     snapshot_options.include_computed_styles = toggles.contrast;
 
-    let snapshot = page.snapshot(snapshot_options).await
+    let snapshot = page
+        .snapshot(snapshot_options)
+        .await
         .map_err(|e| format!("Failed to capture snapshot: {e}"))?;
 
     // Run SEO analysis
@@ -362,7 +530,9 @@ struct ContrastReport {
     issues: Vec<ContrastIssue>,
 }
 
-fn build_performance_report(timing: &pagelens_core::snapshot::PerformanceTiming) -> PerformanceReport {
+fn build_performance_report(
+    timing: &pagelens_core::snapshot::PerformanceTiming,
+) -> PerformanceReport {
     PerformanceReport {
         navigation_start_ms: timing.navigation_start,
         ttfb_ms: delta_from_nav(timing.navigation_start, timing.response_start),
@@ -370,7 +540,10 @@ fn build_performance_report(timing: &pagelens_core::snapshot::PerformanceTiming)
         dom_content_loaded_ms: delta_from_nav(timing.navigation_start, timing.dom_content_loaded),
         load_complete_ms: delta_from_nav(timing.navigation_start, timing.load_complete),
         first_paint_ms: delta_from_nav(timing.navigation_start, timing.first_paint),
-        first_contentful_paint_ms: delta_from_nav(timing.navigation_start, timing.first_contentful_paint),
+        first_contentful_paint_ms: delta_from_nav(
+            timing.navigation_start,
+            timing.first_contentful_paint,
+        ),
     }
 }
 
@@ -389,7 +562,8 @@ fn analyze_contrast(styles: &[pagelens_core::snapshot::ComputedStyle]) -> Contra
             continue;
         };
 
-        let (Some(fg_luminance), Some(bg_luminance)) = (color_luminance(fg), color_luminance(bg)) else {
+        let (Some(fg_luminance), Some(bg_luminance)) = (color_luminance(fg), color_luminance(bg))
+        else {
             continue;
         };
 
@@ -408,7 +582,11 @@ fn analyze_contrast(styles: &[pagelens_core::snapshot::ComputedStyle]) -> Contra
         }
     }
 
-    issues.sort_by(|a, b| a.ratio.partial_cmp(&b.ratio).unwrap_or(std::cmp::Ordering::Equal));
+    issues.sort_by(|a, b| {
+        a.ratio
+            .partial_cmp(&b.ratio)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     issues.truncate(20);
 
     ContrastReport {
@@ -435,10 +613,7 @@ fn parse_rgb_triplet(value: &str) -> Option<(u8, u8, u8)> {
         return None;
     };
 
-    let parts = body
-        .split(',')
-        .map(|p| p.trim())
-        .collect::<Vec<_>>();
+    let parts = body.split(',').map(|p| p.trim()).collect::<Vec<_>>();
     if parts.len() < 3 {
         return None;
     }
@@ -678,12 +853,19 @@ async fn analyze_asset_sizes(
 
     if let Ok(client) = client {
         let mut entries = Vec::new();
-        entries.extend(analyze_category_sizes(&client, &assets.javascript, AssetType::JavaScript).await);
-        entries.extend(analyze_category_sizes(&client, &assets.stylesheets, AssetType::Stylesheet).await);
+        entries.extend(
+            analyze_category_sizes(&client, &assets.javascript, AssetType::JavaScript).await,
+        );
+        entries.extend(
+            analyze_category_sizes(&client, &assets.stylesheets, AssetType::Stylesheet).await,
+        );
         entries.extend(analyze_category_sizes(&client, &assets.media, AssetType::Media).await);
         let total_bytes = sum_known_bytes(&entries);
 
-        AssetSizeSummary { entries, total_bytes }
+        AssetSizeSummary {
+            entries,
+            total_bytes,
+        }
     } else {
         let fallback = |urls: &[String], asset_type: AssetType| {
             urls.iter()
@@ -700,7 +882,10 @@ async fn analyze_asset_sizes(
         entries.extend(fallback(&assets.javascript, AssetType::JavaScript));
         entries.extend(fallback(&assets.stylesheets, AssetType::Stylesheet));
         entries.extend(fallback(&assets.media, AssetType::Media));
-        AssetSizeSummary { entries, total_bytes: 0 }
+        AssetSizeSummary {
+            entries,
+            total_bytes: 0,
+        }
     }
 }
 
@@ -716,7 +901,11 @@ async fn analyze_category_sizes(
     out
 }
 
-async fn fetch_asset_size(client: &reqwest::Client, url: &str, asset_type: AssetType) -> AssetSizeEntry {
+async fn fetch_asset_size(
+    client: &reqwest::Client,
+    url: &str,
+    asset_type: AssetType,
+) -> AssetSizeEntry {
     let head_res = client.head(url).send().await;
     if let Ok(resp) = head_res {
         if resp.status().is_success() {
@@ -743,7 +932,8 @@ async fn fetch_asset_size(client: &reqwest::Client, url: &str, asset_type: Asset
     let range_res = client.get(url).header(RANGE, "bytes=0-0").send().await;
     match range_res {
         Ok(resp) => {
-            if !resp.status().is_success() && resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+            if !resp.status().is_success() && resp.status() != reqwest::StatusCode::PARTIAL_CONTENT
+            {
                 return AssetSizeEntry {
                     url: url.to_string(),
                     asset_type,
@@ -860,10 +1050,7 @@ fn print_contrast_report(report: &ContrastReport) {
         for issue in &report.issues {
             println!(
                 "    - {} [ratio {:.2}:1 | fg {} | bg {}]",
-                issue.selector,
-                issue.ratio,
-                issue.foreground,
-                issue.background
+                issue.selector, issue.ratio, issue.foreground, issue.background
             );
         }
     }
@@ -918,7 +1105,12 @@ fn print_asset_size_group(label: &str, asset_type: AssetType, entries: &[AssetSi
 
 fn print_group_entries(label: &str, entries: &[AssetSizeEntry]) {
     let known = entries.iter().filter_map(|e| e.bytes).sum::<u64>();
-    println!("  {}: {} ({} files)", label, format_bytes(known), entries.len());
+    println!(
+        "  {}: {} ({} files)",
+        label,
+        format_bytes(known),
+        entries.len()
+    );
     for entry in entries {
         let type_label = entry.asset_type.label();
         if let Some(bytes) = entry.bytes {
@@ -980,7 +1172,11 @@ fn print_site_files_report(report: &pagelens_core::site_files::SiteFilesReport) 
     println!("  Base URL: {}", report.base_url);
     println!(
         "  robots.txt: {}{}",
-        if report.robots.found { "found" } else { "missing" },
+        if report.robots.found {
+            "found"
+        } else {
+            "missing"
+        },
         report
             .robots
             .status
@@ -1025,8 +1221,7 @@ fn parse_headers(raw_headers: &[String]) -> Result<HashMap<String, String>, Stri
 }
 
 fn validate_header(name: &str, value: &str) -> Result<(), String> {
-    HeaderName::from_bytes(name.as_bytes())
-        .map_err(|e| format!("invalid header name ({e})"))?;
+    HeaderName::from_bytes(name.as_bytes()).map_err(|e| format!("invalid header name ({e})"))?;
     HeaderValue::from_str(value).map_err(|e| format!("invalid header value ({e})"))?;
     Ok(())
 }
@@ -1061,30 +1256,53 @@ fn print_results(report: &pagelens_core::seo::SeoReport) {
         "\x1b[31m" // Red
     };
     let reset = "\x1b[0m";
-    
-    println!("  Overall Score: {}{:.0}/100{}\n", score_color, report.score, reset);
+
+    println!(
+        "  Overall Score: {}{:.0}/100{}\n",
+        score_color, report.score, reset
+    );
 
     // Meta Tags
     println!("  📋 Meta Tags");
     println!("  ─────────────────────────────────────────────────────────");
-    
+
     if let Some(title) = &report.meta.title {
         let title_status = if title.len() <= 60 { "✅" } else { "⚠️ " };
-        println!("    {} Title: {} ({} chars)", title_status, title, title.len());
+        println!(
+            "    {} Title: {} ({} chars)",
+            title_status,
+            title,
+            title.len()
+        );
     } else {
         println!("    ❌ Title: Missing");
     }
-    
+
     if let Some(desc) = &report.meta.description {
-        let desc_status = if desc.len() >= 50 && desc.len() <= 160 { "✅" } else { "⚠️ " };
-        println!("    {} Description: {} ({} chars)", desc_status, desc, desc.len());
+        let desc_status = if desc.len() >= 50 && desc.len() <= 160 {
+            "✅"
+        } else {
+            "⚠️ "
+        };
+        println!(
+            "    {} Description: {} ({} chars)",
+            desc_status,
+            desc,
+            desc.len()
+        );
     } else {
         println!("    ❌ Description: Missing");
     }
-    
-    println!("    {} Charset", if report.meta.charset { "✅" } else { "❌" });
-    println!("    {} Viewport", if report.meta.viewport { "✅" } else { "❌" });
-    
+
+    println!(
+        "    {} Charset",
+        if report.meta.charset { "✅" } else { "❌" }
+    );
+    println!(
+        "    {} Viewport",
+        if report.meta.viewport { "✅" } else { "❌" }
+    );
+
     if let Some(lang) = &report.meta.language {
         println!("    ✅ Language: {}", lang);
     } else {
@@ -1095,19 +1313,75 @@ fn print_results(report: &pagelens_core::seo::SeoReport) {
     // Open Graph
     println!("  🔗 Open Graph Tags");
     println!("  ─────────────────────────────────────────────────────────");
-    println!("    {} og:title", if report.open_graph.title.is_some() { "✅" } else { "❌" });
-    println!("    {} og:description", if report.open_graph.description.is_some() { "✅" } else { "❌" });
-    println!("    {} og:type", if report.open_graph.og_type.is_some() { "✅" } else { "❌" });
-    println!("    {} og:url", if report.open_graph.url.is_some() { "✅" } else { "❌" });
-    println!("    {} og:image", if report.open_graph.image.is_some() { "✅" } else { "❌" });
+    println!(
+        "    {} og:title",
+        if report.open_graph.title.is_some() {
+            "✅"
+        } else {
+            "❌"
+        }
+    );
+    println!(
+        "    {} og:description",
+        if report.open_graph.description.is_some() {
+            "✅"
+        } else {
+            "❌"
+        }
+    );
+    println!(
+        "    {} og:type",
+        if report.open_graph.og_type.is_some() {
+            "✅"
+        } else {
+            "❌"
+        }
+    );
+    println!(
+        "    {} og:url",
+        if report.open_graph.url.is_some() {
+            "✅"
+        } else {
+            "❌"
+        }
+    );
+    println!(
+        "    {} og:image",
+        if report.open_graph.image.is_some() {
+            "✅"
+        } else {
+            "❌"
+        }
+    );
     println!();
 
     // Twitter Cards
     println!("  🐦 Twitter Cards");
     println!("  ─────────────────────────────────────────────────────────");
-    println!("    {} twitter:card", if report.twitter_card.card.is_some() { "✅" } else { "❌" });
-    println!("    {} twitter:title", if report.twitter_card.title.is_some() { "✅" } else { "❌" });
-    println!("    {} twitter:description", if report.twitter_card.description.is_some() { "✅" } else { "❌" });
+    println!(
+        "    {} twitter:card",
+        if report.twitter_card.card.is_some() {
+            "✅"
+        } else {
+            "❌"
+        }
+    );
+    println!(
+        "    {} twitter:title",
+        if report.twitter_card.title.is_some() {
+            "✅"
+        } else {
+            "❌"
+        }
+    );
+    println!(
+        "    {} twitter:description",
+        if report.twitter_card.description.is_some() {
+            "✅"
+        } else {
+            "❌"
+        }
+    );
     println!();
 
     // Canonical
@@ -1123,7 +1397,8 @@ fn print_results(report: &pagelens_core::seo::SeoReport) {
     // Headings
     println!("  📝 Headings Structure");
     println!("  ─────────────────────────────────────────────────────────");
-    println!("    H1: {}  H2: {}  H3: {}  H4: {}  H5: {}  H6: {}", 
+    println!(
+        "    H1: {}  H2: {}  H3: {}  H4: {}  H5: {}  H6: {}",
         report.headings.h1_count,
         report.headings.h2_count,
         report.headings.h3_count,
@@ -1151,7 +1426,7 @@ fn print_results(report: &pagelens_core::seo::SeoReport) {
     if !report.issues.is_empty() {
         println!("  ⚠️  Issues Found ({})", report.issues.len());
         println!("  ─────────────────────────────────────────────────────────");
-        
+
         for issue in &report.issues {
             let icon = match issue.severity {
                 Severity::Error => "❌",
@@ -1224,7 +1499,10 @@ mod tests {
         ])
         .expect("headers should parse");
 
-        assert_eq!(parsed.get("Authorization"), Some(&"Bearer token:abc".to_string()));
+        assert_eq!(
+            parsed.get("Authorization"),
+            Some(&"Bearer token:abc".to_string())
+        );
         assert_eq!(parsed.get("X-Org"), Some(&"pagelens".to_string()));
     }
 
