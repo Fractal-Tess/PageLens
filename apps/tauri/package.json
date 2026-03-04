@@ -57,7 +57,7 @@
   "devDependencies": {
     "@dnd-kit-svelte/svelte": "^0.1.5",
     "@dnd-kit/abstract": "^0.1.21",
-    "@dnd-kit/helpers": "^0.1.21",
+    "@dnd-kit/helpers": "^0.3.2",
     "@tabler/icons-svelte": "^3.36.0",
     "@tailwindcss/vite": "^4.2.1",
     "@tanstack/table-core": "^8.21.3",
