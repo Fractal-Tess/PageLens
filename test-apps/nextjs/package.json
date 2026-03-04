@@ -3,7 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p ${NEXTJS_PORT:-3000}",
     "build": "next build",
     "start": "next start -p ${NEXTJS_PORT:-44791}",
     "preview": "next start -p ${NEXTJS_PORT:-3000}",
