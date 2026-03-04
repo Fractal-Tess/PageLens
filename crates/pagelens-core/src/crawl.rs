@@ -1,7 +1,7 @@
 //! Multi-page crawling with link following
 
-use crate::prelude::*;
 use crate::browser::Browser;
+use crate::prelude::*;
 use crate::seo::{SeoAnalyzer, SeoReport};
 use crate::snapshot::{Snapshot, SnapshotExt, SnapshotOptions};
 use futures::future::join_all;
@@ -9,12 +9,11 @@ use scraper::{Html, Selector};
 use std::collections::{HashSet, VecDeque};
 use std::sync::LazyLock;
 use std::time::Instant;
-use tokio::time::{Duration, timeout};
+use tokio::time::{timeout, Duration};
 
 // Pre-compiled CSS selector for link extraction
-static LINK_SELECTOR: LazyLock<Selector> = LazyLock::new(|| {
-    Selector::parse("a[href]").expect("valid link selector")
-});
+static LINK_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("a[href]").expect("valid link selector"));
 
 /// Options for crawling a website.
 #[derive(Debug, Clone)]
@@ -72,12 +71,15 @@ pub struct CrawledPage {
 pub struct CrawlStats {
     /// Total pages discovered.
     pub total_pages: usize,
+    pub queued_pages: usize,
+    pub running_pages: usize,
     /// Pages successfully crawled.
     pub crawled_pages: usize,
     /// Pages that failed to crawl.
     pub failed_pages: usize,
     /// External links found (not crawled).
     pub external_links: usize,
+    pub links_found_total: usize,
     /// Total crawl time in milliseconds.
     pub crawl_time_ms: u64,
     /// Average page load time in milliseconds.
@@ -134,7 +136,7 @@ impl<'a> Crawler<'a> {
     }
 
     /// Crawl starting from a seed URL.
-    /// 
+    ///
     /// This will:
     /// 1. Load the seed page
     /// 2. Extract all internal links
@@ -144,14 +146,21 @@ impl<'a> Crawler<'a> {
         self.crawl_with_callback(seed_url, |_page, _stats| {}).await
     }
 
-    pub async fn crawl_with_callback<F>(&self, seed_url: &str, mut on_page: F) -> Result<CrawlResult>
+    pub async fn crawl_with_callback<F>(
+        &self,
+        seed_url: &str,
+        mut on_page: F,
+    ) -> Result<CrawlResult>
     where
         F: FnMut(&CrawledPage, &CrawlStats),
     {
         let start_time = Instant::now();
-        
+
         // Validate URL
-        if !seed_url.starts_with("http://") && !seed_url.starts_with("https://") && !seed_url.starts_with("data:") {
+        if !seed_url.starts_with("http://")
+            && !seed_url.starts_with("https://")
+            && !seed_url.starts_with("data:")
+        {
             return Err(Error::InvalidUrl(seed_url.to_string()));
         }
 
@@ -171,6 +180,8 @@ impl<'a> Crawler<'a> {
         let mut total_page_load_ms: u64 = 0;
         to_visit.push_back((seed_url.to_string(), 0)); // (url, depth)
         queued.insert(seed_url.to_string());
+        result.stats.total_pages = 1;
+        result.stats.queued_pages = 1;
 
         let max_concurrency = self.options.max_concurrency.max(1);
 
@@ -205,6 +216,11 @@ impl<'a> Crawler<'a> {
                 break;
             }
 
+            result.stats.running_pages = batch.len();
+            result.stats.queued_pages = to_visit.len();
+            result.stats.total_pages = visited.len() + queued.len() + result.skipped_urls.len();
+
+            let batch_len = batch.len();
             let batch_results = join_all(batch.into_iter().map(|(url, depth)| async move {
                 let page_start = Instant::now();
                 let crawled_page = self.crawl_single_page(&url, depth).await;
@@ -213,15 +229,18 @@ impl<'a> Crawler<'a> {
             }))
             .await;
 
-            for (url, depth, crawled_page, page_load_ms) in batch_results {
+            for (index, (url, depth, crawled_page, page_load_ms)) in
+                batch_results.into_iter().enumerate()
+            {
                 total_page_load_ms += page_load_ms;
 
-                result.stats.total_pages += 1;
                 if crawled_page.success {
                     result.stats.crawled_pages += 1;
                 } else {
                     result.stats.failed_pages += 1;
                 }
+
+                result.stats.links_found_total += crawled_page.links_found.len();
 
                 for link in &crawled_page.links_found {
                     if visited.contains(link) || queued.contains(link) {
@@ -237,6 +256,9 @@ impl<'a> Crawler<'a> {
                 }
 
                 result.pages.push(crawled_page);
+                result.stats.running_pages = batch_len.saturating_sub(index + 1);
+                result.stats.queued_pages = to_visit.len();
+                result.stats.total_pages = visited.len() + queued.len() + result.skipped_urls.len();
                 if let Some(last_page) = result.pages.last() {
                     on_page(last_page, &result.stats);
                 }
@@ -298,7 +320,8 @@ impl<'a> Crawler<'a> {
         };
 
         // Capture snapshot
-        let snapshot = match timeout(page_timeout, page.snapshot(SnapshotOptions::default())).await {
+        let snapshot = match timeout(page_timeout, page.snapshot(SnapshotOptions::default())).await
+        {
             Ok(Ok(s)) => s,
             Ok(Err(e)) => {
                 crawled.error = Some(format!("Snapshot failed: {e}"));
@@ -372,16 +395,16 @@ impl<'a> Crawler<'a> {
         // Find the comma that separates the MIME type from the data
         if let Some(comma_pos) = url.find(',') {
             let data_part = &url[comma_pos + 1..];
-            
+
             // For text/html data URLs, URL decode the content
             if url[..comma_pos].contains("text/html") {
                 return Self::url_decode(data_part);
             }
-            
+
             // Return as-is for other types
             return data_part.to_string();
         }
-        
+
         String::new()
     }
 
@@ -401,7 +424,7 @@ impl<'a> Crawler<'a> {
     fn url_decode(input: &str) -> String {
         let mut result = String::with_capacity(input.len());
         let mut chars = input.chars().peekable();
-        
+
         while let Some(ch) = chars.next() {
             if ch == '%' {
                 let mut hex = String::with_capacity(2);
@@ -423,7 +446,7 @@ impl<'a> Crawler<'a> {
                 result.push(ch);
             }
         }
-        
+
         result
     }
 
@@ -462,12 +485,12 @@ impl<'a> Crawler<'a> {
         if href.starts_with("http://") || href.starts_with("https://") {
             return Some(href.to_string());
         }
-        
+
         // Data URLs - treat as absolute
         if href.starts_with("data:") {
             return Some(href.to_string());
         }
-        
+
         // Protocol-relative
         if href.starts_with("//") {
             if let Some(pos) = base.find("://") {
@@ -476,19 +499,19 @@ impl<'a> Crawler<'a> {
             }
             return None;
         }
-        
+
         // For data URLs, we can't really resolve relative links meaningfully
         // Return as-is for testing purposes
         if base.starts_with("data:") {
             return Some(href.to_string());
         }
-        
+
         // Parse base URL
         let base_parsed = match url::Url::parse(base) {
             Ok(u) => u,
             Err(_) => return None,
         };
-        
+
         // Join with base
         match base_parsed.join(href) {
             Ok(u) => Some(u.to_string()),
@@ -534,7 +557,8 @@ impl<'a> Crawler<'a> {
             return AggregateMetrics::default();
         }
 
-        let scores: Vec<f64> = pages.iter()
+        let scores: Vec<f64> = pages
+            .iter()
             .filter(|p| p.success)
             .map(|p| p.seo_report.score)
             .collect();
@@ -547,18 +571,28 @@ impl<'a> Crawler<'a> {
         let min = scores.iter().fold(f64::INFINITY, |a, &b| a.min(b));
         let max = scores.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
 
-        let total_issues: usize = pages.iter()
-            .map(|p| p.seo_report.issues.len())
+        let total_issues: usize = pages.iter().map(|p| p.seo_report.issues.len()).sum();
+
+        let total_errors: usize = pages
+            .iter()
+            .map(|p| {
+                p.seo_report
+                    .issues
+                    .iter()
+                    .filter(|i| matches!(i.severity, crate::seo::Severity::Error))
+                    .count()
+            })
             .sum();
 
-        let total_errors: usize = pages.iter()
-            .map(|p| p.seo_report.issues.iter().filter(|i| 
-                matches!(i.severity, crate::seo::Severity::Error)).count())
-            .sum();
-
-        let total_warnings: usize = pages.iter()
-            .map(|p| p.seo_report.issues.iter().filter(|i| 
-                matches!(i.severity, crate::seo::Severity::Warning)).count())
+        let total_warnings: usize = pages
+            .iter()
+            .map(|p| {
+                p.seo_report
+                    .issues
+                    .iter()
+                    .filter(|i| matches!(i.severity, crate::seo::Severity::Warning))
+                    .count()
+            })
             .sum();
 
         // Score distribution
@@ -589,7 +623,7 @@ impl<'a> Crawler<'a> {
     fn generate_summary(&self, result: &CrawlResult) -> String {
         let agg = &result.aggregate;
         let stats = &result.stats;
-        
+
         format!(
             "Crawl complete: {} pages crawled in {}ms. \
              Average SEO score: {:.0}/100. \
@@ -614,10 +648,10 @@ mod tests {
                     <a href=\"https://example.com/page\">External</a>\
                     <a href=\"#anchor\">Anchor</a>\
                     <a href=\"javascript:void(0)\">JS</a>";
-        
+
         let base = "https://mysite.com/";
         let links = Crawler::extract_links(html, base);
-        
+
         assert_eq!(links.len(), 2);
         assert!(links.contains(&"https://mysite.com/about".to_string()));
         assert!(links.contains(&"https://example.com/page".to_string()));
@@ -630,13 +664,13 @@ mod tests {
             Crawler::resolve_url("https://example.com/", "https://other.com/page"),
             Some("https://other.com/page".to_string())
         );
-        
+
         // Relative URL
         assert_eq!(
             Crawler::resolve_url("https://example.com/dir/", "page.html"),
             Some("https://example.com/dir/page.html".to_string())
         );
-        
+
         // Root-relative URL
         assert_eq!(
             Crawler::resolve_url("https://example.com/", "/page"),

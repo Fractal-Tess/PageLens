@@ -27,4 +27,7 @@ pub enum Error {
     /// Failed to extract data from the page.
     #[error("Failed to extract page data: {0}")]
     ExtractionFailed(String),
+
+    #[error("HTTP request failed: {0}")]
+    HttpRequestFailed(String),
 }

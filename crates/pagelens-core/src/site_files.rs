@@ -178,7 +178,11 @@ impl SiteFilesAnalyzer {
         report.sitemap_urls = sitemap_url_set.iter().cloned().collect();
 
         if report.sitemap_urls.is_empty() {
-            report.add_issue(Severity::Warning, "sitemap", "No URLs found in sitemap files");
+            report.add_issue(
+                Severity::Warning,
+                "sitemap",
+                "No URLs found in sitemap files",
+            );
         }
 
         let misc_paths = [
@@ -209,14 +213,10 @@ impl SiteFilesAnalyzer {
 
             let sitemap_set: BTreeSet<String> = report.sitemap_urls.iter().cloned().collect();
 
-            let in_sitemap_not_in_crawl: Vec<String> = sitemap_set
-                .difference(&crawl_set)
-                .cloned()
-                .collect();
-            let in_crawl_not_in_sitemap: Vec<String> = crawl_set
-                .difference(&sitemap_set)
-                .cloned()
-                .collect();
+            let in_sitemap_not_in_crawl: Vec<String> =
+                sitemap_set.difference(&crawl_set).cloned().collect();
+            let in_crawl_not_in_sitemap: Vec<String> =
+                crawl_set.difference(&sitemap_set).cloned().collect();
 
             if !in_sitemap_not_in_crawl.is_empty() {
                 report.add_issue(
@@ -250,8 +250,8 @@ impl SiteFilesAnalyzer {
 }
 
 fn normalize_base_url(base_url: &str) -> Result<String> {
-    let mut parsed = Url::parse(base_url)
-        .map_err(|e| Error::InvalidUrl(format!("{base_url} ({e})")))?;
+    let mut parsed =
+        Url::parse(base_url).map_err(|e| Error::InvalidUrl(format!("{base_url} ({e})")))?;
     parsed.set_query(None);
     parsed.set_fragment(None);
     let mut s = parsed.to_string();
@@ -375,7 +375,11 @@ async fn fetch_robots(client: &reqwest::Client, base_url: &str) -> RobotsReport 
     }
 }
 
-async fn fetch_sitemap(client: &reqwest::Client, base_url: &str, sitemap_url: &str) -> SitemapReport {
+async fn fetch_sitemap(
+    client: &reqwest::Client,
+    base_url: &str,
+    sitemap_url: &str,
+) -> SitemapReport {
     let response = client.get(sitemap_url).send().await;
     match response {
         Ok(resp) => {
@@ -463,7 +467,8 @@ mod tests {
 
     #[test]
     fn parse_robots_extracts_sitemaps() {
-        let txt = "User-agent: *\nSitemap: https://example.com/sitemap.xml\nSitemap: /sitemap-blog.xml\n";
+        let txt =
+            "User-agent: *\nSitemap: https://example.com/sitemap.xml\nSitemap: /sitemap-blog.xml\n";
         let sitemaps = parse_robots_sitemaps(txt);
         assert_eq!(sitemaps.len(), 2);
         assert_eq!(sitemaps[0], "https://example.com/sitemap.xml");

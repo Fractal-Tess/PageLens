@@ -35,7 +35,7 @@ const CHROMIUM_BINARIES: &[&str] = &[
 ];
 
 /// Locates a Chromium binary on the system.
-/// 
+///
 /// Search order:
 /// 1. `$PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` environment variable
 /// 2. System PATH for common binary names
@@ -48,7 +48,7 @@ impl ChromiumLocator {
     }
 
     /// Find a Chromium binary.
-    /// 
+    ///
     /// Returns the path to the Chromium executable, or an error if not found.
     pub fn find(&self) -> Result<PathBuf> {
         // 1. Check environment variable first
@@ -79,7 +79,7 @@ impl Default for ChromiumLocator {
 }
 
 /// A handle to a running Chromium browser instance.
-/// 
+///
 /// The browser is automatically shut down when this handle is dropped,
 /// unless explicitly shut down earlier with [`Browser::shutdown`].
 pub struct Browser {
@@ -92,17 +92,17 @@ pub struct Browser {
 
 impl Browser {
     /// Launch a new headless Chromium browser instance.
-    /// 
+    ///
     /// This will:
     /// 1. Find a Chromium binary using [`ChromiumLocator`]
     /// 2. Spawn the browser with headless flags and CDP enabled
     /// 3. Connect via the Chrome DevTools Protocol
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```no_run
     /// use pagelens_core::browser::Browser;
-    /// 
+    ///
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let browser = Browser::launch().await?;
     /// // Use browser...
@@ -178,35 +178,42 @@ impl Browser {
 
     /// Get a reference to the underlying chrome browser.
     fn get_browser(&self) -> Result<&ChromeBrowser> {
-        self.browser.as_ref()
+        self.browser
+            .as_ref()
             .ok_or_else(|| Error::BrowserConnectionFailed("Browser not connected".to_string()))
     }
 
     /// Navigate to a URL and return a Page handle.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `url` - The URL to navigate to
-    /// 
+    ///
     /// # Errors
-    /// 
+    ///
     /// Returns an error if navigation fails or the URL is invalid.
     pub async fn navigate(&self, url: &str) -> Result<Page> {
         self.navigate_with_headers(url, &HashMap::new()).await
     }
 
-    pub async fn navigate_with_headers(&self, url: &str, headers: &HashMap<String, String>) -> Result<Page> {
+    pub async fn navigate_with_headers(
+        &self,
+        url: &str,
+        headers: &HashMap<String, String>,
+    ) -> Result<Page> {
         // Validate URL
-        if !url.starts_with("http://") 
-            && !url.starts_with("https://") 
-            && !url.starts_with("data:") 
-            && !url.starts_with("file://") {
+        if !url.starts_with("http://")
+            && !url.starts_with("https://")
+            && !url.starts_with("data:")
+            && !url.starts_with("file://")
+        {
             return Err(Error::InvalidUrl(url.to_string()));
         }
 
         let browser = self.get_browser()?;
-        let collected_network_requests: Arc<tokio::sync::Mutex<Vec<crate::snapshot::NetworkRequestRecord>>> =
-            Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        let collected_network_requests: Arc<
+            tokio::sync::Mutex<Vec<crate::snapshot::NetworkRequestRecord>>,
+        > = Arc::new(tokio::sync::Mutex::new(Vec::new()));
 
         let cdp_page = browser
             .new_page("about:blank")
@@ -373,9 +380,10 @@ impl Browser {
         // Check if the browser ended up on a Chrome error page (e.g. host unreachable)
         if let Ok(Some(final_url)) = cdp_page.url().await {
             if final_url.starts_with("chrome-error://") {
-                return Err(Error::NavigationFailed(
-                    format!("Failed to load {}: page unreachable", url),
-                ));
+                return Err(Error::NavigationFailed(format!(
+                    "Failed to load {}: page unreachable",
+                    url
+                )));
             }
         }
 
@@ -387,7 +395,7 @@ impl Browser {
     }
 
     /// Shut down the browser gracefully.
-    /// 
+    ///
     /// This closes all pages and the browser connection.
     /// It's safe to call multiple times.
     pub async fn shutdown(mut self) -> Result<()> {
@@ -420,14 +428,15 @@ impl Drop for Browser {
 }
 
 /// A handle to a specific page/tab in the browser.
-/// 
+///
 /// Used to interact with a loaded page and extract data from it.
 pub struct Page {
     /// The chrome page handle (crate-visible for snapshot access)
     pub(crate) cdp_page: Option<ChromePage>,
     /// The URL of the page
     url: String,
-    pub(crate) network_requests: Arc<tokio::sync::Mutex<Vec<crate::snapshot::NetworkRequestRecord>>>,
+    pub(crate) network_requests:
+        Arc<tokio::sync::Mutex<Vec<crate::snapshot::NetworkRequestRecord>>>,
 }
 
 impl Page {
@@ -441,7 +450,7 @@ impl Page {
     }
 
     /// Get the full HTML content of the page.
-    /// 
+    ///
     /// Returns the rendered DOM as a string.
     pub async fn html(&self) -> Result<String> {
         if let Some(cdp_page) = &self.cdp_page {
@@ -449,13 +458,14 @@ impl Page {
             // Retry a few times if we get empty content (page might still be loading)
             let mut attempts = 0;
             while attempts < 5 {
-                match cdp_page.evaluate("document.documentElement.outerHTML").await {
-                    Ok(result) => {
-                        match result.into_value::<String>() {
-                            Ok(html) if !html.is_empty() => return Ok(html),
-                            _ => {}
-                        }
-                    }
+                match cdp_page
+                    .evaluate("document.documentElement.outerHTML")
+                    .await
+                {
+                    Ok(result) => match result.into_value::<String>() {
+                        Ok(html) if !html.is_empty() => return Ok(html),
+                        _ => {}
+                    },
                     Err(_) => {}
                 }
                 attempts += 1;
@@ -463,7 +473,7 @@ impl Page {
                     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                 }
             }
-            
+
             // If all attempts failed, return empty string
             Ok(String::new())
         } else if self.url.starts_with("data:") {
@@ -492,9 +502,11 @@ impl Page {
                 }
                 Err(_) => {}
             }
-            
+
             // Fallback to CDP get_title
-            let title = cdp_page.get_title().await
+            let title = cdp_page
+                .get_title()
+                .await
                 .map_err(|e| Error::ExtractionFailed(e.to_string()))?;
             Ok(title.unwrap_or_default())
         } else {
@@ -507,7 +519,7 @@ impl Page {
 fn url_decode(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
-    
+
     while let Some(ch) = chars.next() {
         if ch == '%' {
             let mut hex = String::with_capacity(2);
@@ -529,7 +541,7 @@ fn url_decode(input: &str) -> String {
             result.push(ch);
         }
     }
-    
+
     result
 }
 

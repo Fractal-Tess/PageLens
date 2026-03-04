@@ -187,6 +187,8 @@ pub struct SeoReport {
     pub twitter_card: TwitterCardInfo,
     /// Canonical URL (if present).
     pub canonical_url: Option<String>,
+    /// Favicon URL extracted from the page (if present).
+    pub favicon_url: Option<String>,
     /// Heading structure.
     pub headings: HeadingsInfo,
     /// Images found on the page.
@@ -206,6 +208,7 @@ impl SeoReport {
             open_graph: OpenGraphInfo::default(),
             twitter_card: TwitterCardInfo::default(),
             canonical_url: None,
+            favicon_url: None,
             headings: HeadingsInfo::default(),
             images: Vec::new(),
             structured_data: Vec::new(),
@@ -285,6 +288,10 @@ impl SeoAnalyzer {
 
         // Analyze structured data
         Self::analyze_structured_data(&mut report, &document);
+
+        // Favicon
+        report.favicon_url = snapshot.favicon_url.clone();
+        Self::analyze_favicon(&mut report, snapshot);
 
         // Calculate final score
         report.score = Self::calculate_score(&report, snapshot, score_config);
@@ -1345,6 +1352,13 @@ impl SeoAnalyzer {
         }
     }
 
+    /// Analyze favicon presence and quality.
+    fn analyze_favicon(report: &mut SeoReport, snapshot: &Snapshot) {
+        if snapshot.favicon_url.is_none() {
+            report.add_issue(Severity::Warning, "favicon", "No favicon declared");
+        }
+    }
+
     /// Calculate overall SEO score.
     fn calculate_score(report: &SeoReport, snapshot: &Snapshot, score_config: &ScoreConfig) -> f64 {
         let mut issue_score = 100.0;
@@ -1759,6 +1773,7 @@ mod tests {
             },
             computed_styles: Vec::new(),
             referenced_assets: crate::snapshot::ReferencedAssets::default(),
+            favicon_url: None,
             main_resource_network: crate::snapshot::MainResourceNetwork::default(),
             network_requests: Vec::new(),
             capture_issues: Vec::new(),
