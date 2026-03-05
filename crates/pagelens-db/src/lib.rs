@@ -93,6 +93,10 @@ impl Database {
                 4,
                 include_str!("../migrations/004_analysis_type_http_benchmark.sql"),
             ),
+            (
+                5,
+                include_str!("../migrations/005_analysis_type_favicon.sql"),
+            ),
         ];
 
         // Apply pending migrations in a transaction

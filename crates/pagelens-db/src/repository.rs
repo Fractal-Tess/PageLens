@@ -30,6 +30,7 @@ impl<'a> AnalysisRepository<'a> {
             AnalysisType::Single => "single",
             AnalysisType::Crawl => "crawl",
             AnalysisType::HttpBenchmark => "http_benchmark",
+            AnalysisType::Favicon => "favicon",
         };
         let status_str = status_to_str(input.status);
 
@@ -108,6 +109,7 @@ impl<'a> AnalysisRepository<'a> {
             let analysis_type = match analysis_type_str.as_str() {
                 "crawl" => AnalysisType::Crawl,
                 "http_benchmark" => AnalysisType::HttpBenchmark,
+                "favicon" => AnalysisType::Favicon,
                 _ => AnalysisType::Single,
             };
 
@@ -594,6 +596,7 @@ impl<'a> AnalysisRepository<'a> {
         let analysis_type = match analysis_type_str.as_str() {
             "crawl" => AnalysisType::Crawl,
             "http_benchmark" => AnalysisType::HttpBenchmark,
+            "favicon" => AnalysisType::Favicon,
             _ => AnalysisType::Single,
         };
 

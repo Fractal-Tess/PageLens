@@ -8,6 +8,7 @@
 		getRunPages,
 		isHttpBenchmarkRunPayload,
 		parseRunPayload,
+		runResultPath,
 		subscribeToEvents,
 		startAnalysis
 	} from '$lib/api';
@@ -73,7 +74,7 @@
 				url,
 				analysis_type: run?.analysis_type
 			});
-			await goto(`/run/${result.run_id}`);
+			await goto(runResultPath(result.run_id, run?.analysis_type));
 		} catch {
 			rerunningUrl = null;
 		}
@@ -98,7 +99,7 @@
 				analysis_type: run.analysis_type,
 				benchmark_options: benchmarkOptions
 			});
-			await goto(`/run/${result.run_id}`);
+			await goto(runResultPath(result.run_id, run.analysis_type));
 		} catch {
 			/* noop */
 		} finally {
@@ -124,6 +125,10 @@
 	async function fetchRun(targetRunId = runId, version = loadVersion) {
 		try {
 			const nextRun = await getRun(targetRunId);
+			if (nextRun.analysis_type === 'favicon') {
+				await goto(runResultPath(targetRunId, nextRun.analysis_type));
+				return;
+			}
 			if (targetRunId !== runId || version !== loadVersion) return;
 			if (
 				run &&

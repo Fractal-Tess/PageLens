@@ -12,7 +12,7 @@ export interface StartAnalysisRequest {
   run_id?: string;
   url: string;
   name?: string;
-  analysis_type?: "single" | "crawl" | "http_benchmark";
+  analysis_type?: "single" | "crawl" | "http_benchmark" | "favicon";
   options?: AnalysisOptions;
   crawl_options?: CrawlAnalysisOptions;
   benchmark_options?: BenchmarkOptions;
@@ -48,10 +48,13 @@ export interface FaviconCandidate {
   rel: string;
   sizes: string | null;
   mime_type: string | null;
+  media: string | null;
   source: "html_link" | "default_path" | string;
 }
 
 export interface FaviconAnalysisResult {
+  schema_version: string;
+  rule_version: string;
   input_url: string;
   resolved_page_url: string;
   default_favicon_url: string;
@@ -73,6 +76,8 @@ export interface FaviconAnalysisResult {
     rel: string;
     source: string;
     mime_type: string | null;
+    media: string | null;
+    preferred_theme: string | null;
     declared_sizes: string | null;
     format: string | null;
     file_size_bytes: number | null;
@@ -83,6 +88,59 @@ export interface FaviconAnalysisResult {
     recommendations: string[];
   }>;
   global_recommendations: string[];
+  report_v2: {
+    generated_at: string;
+    inventory: Array<{
+      asset_id: string;
+      source: string;
+      rel: string;
+      href: string;
+      final_url: string | null;
+      media: string | null;
+      theme: "light" | "dark" | "light_dark" | "any";
+      declared_mime_type: string | null;
+      declared_sizes: string | null;
+      format: string | null;
+      parsed_sizes: string[];
+      file_size_bytes: number | null;
+      fetch_status: string;
+      contrast_on_light: number | null;
+      contrast_on_dark: number | null;
+    }>;
+    checks: Array<{
+      check_id: string;
+      rule_id: string;
+      category: string;
+      title: string;
+      subject_type: string;
+      subject_id: string;
+      status: "pass" | "warn" | "fail" | "info" | "not_applicable";
+      severity: "critical" | "high" | "medium" | "low" | "info";
+      confidence: number;
+      user_impact: string;
+      details: string;
+      evidence: Array<{ kind: string; value: string }>;
+      recommendation_ids: string[];
+    }>;
+    recommendations: Array<{
+      recommendation_id: string;
+      action_key: string;
+      priority: "critical" | "high" | "medium" | "low" | "info";
+      title: string;
+      why: string[];
+      fix_steps: string[];
+      snippets: Array<{ language: string; content: string }>;
+      related_check_ids: string[];
+      applies_to_assets: string[];
+      priority_score: number;
+    }>;
+    score: {
+      score_0_100: number;
+      grade: string;
+      highlights: string[];
+    };
+    top_actions: string[];
+  };
 }
 
 export interface PwaManifestSummary {
@@ -121,7 +179,7 @@ export interface AnalysisSummary {
 export interface AnalysisRun {
   id: string;
   url: string;
-  analysis_type: "single" | "crawl" | "http_benchmark";
+  analysis_type: "single" | "crawl" | "http_benchmark" | "favicon";
   name?: string;
   // DB serializes as "pending" | "running" | "completed" | "failed"
   status: "pending" | "running" | "completed" | "failed";
@@ -153,7 +211,7 @@ export interface HistoryListItem {
   id: string;
   url: string;
   name?: string;
-  analysis_type: "single" | "crawl" | "http_benchmark";
+  analysis_type: "single" | "crawl" | "http_benchmark" | "favicon";
   status: "pending" | "running" | "completed" | "failed";
   summary: AnalysisSummary;
   created_at: string;
@@ -370,7 +428,8 @@ export interface HttpBenchmarkRunPayload {
 export type RunPayload =
   | SingleRunPayload
   | CrawlRunPayload
-  | HttpBenchmarkRunPayload;
+  | HttpBenchmarkRunPayload
+  | FaviconAnalysisResult;
 
 export function isCrawlRunPayload(
   payload: RunPayload,
@@ -382,6 +441,22 @@ export function isHttpBenchmarkRunPayload(
   payload: RunPayload,
 ): payload is HttpBenchmarkRunPayload {
   return "requests_per_sec" in payload && "latency" in payload;
+}
+
+export function isFaviconRunPayload(
+  payload: RunPayload,
+): payload is FaviconAnalysisResult {
+  return "schema_version" in payload && "candidate_reports" in payload;
+}
+
+export function runResultPath(
+  runId: string,
+  analysisType:
+    | AnalysisRun["analysis_type"]
+    | StartAnalysisRequest["analysis_type"],
+): string {
+  if (analysisType === "favicon") return `/favicon/analyse/${runId}`;
+  return `/run/${runId}`;
 }
 
 export function parseRunPayload(payloadJson: string): RunPayload | null {
@@ -400,7 +475,9 @@ export async function startAnalysis(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
   });
-  if (!res.ok) throw new Error(`Failed to start analysis: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(await apiErrorMessage(res, "Failed to start analysis"));
+  }
   return res.json();
 }
 
@@ -412,7 +489,9 @@ export async function analyzeFavicon(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url }),
   });
-  if (!res.ok) throw new Error(`Failed to analyze favicon: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(await apiErrorMessage(res, "Failed to analyze favicon"));
+  }
   return res.json();
 }
 
@@ -428,7 +507,7 @@ export async function analyzePwa(url: string): Promise<PwaAnalysisResult> {
 
 export async function getRun(runId: string): Promise<AnalysisRun> {
   const res = await fetch(`${BASE_URL}/api/runs/${runId}`);
-  if (!res.ok) throw new Error(`Failed to get run: ${res.status}`);
+  if (!res.ok) throw new Error(await apiErrorMessage(res, "Failed to get run"));
   return res.json();
 }
 
@@ -436,8 +515,22 @@ export async function getRunPages(
   runId: string,
 ): Promise<AnalysisPageResult[]> {
   const res = await fetch(`${BASE_URL}/api/runs/${runId}/pages`);
-  if (!res.ok) throw new Error(`Failed to get run pages: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(await apiErrorMessage(res, "Failed to get run pages"));
+  }
   return res.json();
+}
+
+async function apiErrorMessage(
+  response: Response,
+  fallbackPrefix: string,
+): Promise<string> {
+  try {
+    const body = (await response.json()) as { error?: string };
+    const message = body.error?.trim();
+    if (message) return message;
+  } catch {}
+  return `${fallbackPrefix}: ${response.status}`;
 }
 
 export async function cancelRun(runId: string): Promise<void> {

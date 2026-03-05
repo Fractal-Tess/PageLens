@@ -50,6 +50,7 @@ pub enum AnalysisType {
     Single,
     Crawl,
     HttpBenchmark,
+    Favicon,
 }
 
 /// Summary statistics for quick display in history list.

@@ -34,6 +34,18 @@
 				>
 					BENCHMARK
 				</a>
+				<a
+					href="/analyse/favicon"
+					class="text-[10px] tracking-widest uppercase text-muted-foreground hover:text-foreground transition-colors"
+				>
+					FAVICON
+				</a>
+				<a
+					href="/analyse/pwa"
+					class="text-[10px] tracking-widest uppercase text-muted-foreground hover:text-foreground transition-colors"
+				>
+					PWA
+				</a>
 				<span class="text-border">|</span>
 				<a
 					href="/history"

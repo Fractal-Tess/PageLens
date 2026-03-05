@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { analyzePwa, type PwaAnalysisResult } from '$lib/api';
 	import { Button } from '@pagelens/ui/shadcn/button';
 	import { Input } from '@pagelens/ui/shadcn/input';
@@ -8,6 +10,7 @@
 	let loading = $state(false);
 	let error = $state('');
 	let result = $state<PwaAnalysisResult | null>(null);
+	let lastAnalyzedUrl = $state('');
 
 	const urlSchema = z.string().trim().url().startsWith('http');
 
@@ -18,18 +21,32 @@
 	async function handleSubmit(e: SubmitEvent) {
 		e.preventDefault();
 		if (!url.trim()) return;
+		await goto(`/analyse/pwa?url=${encodeURIComponent(url.trim())}`);
+	}
+
+	const requestedUrl = $derived(page.url.searchParams.get('url')?.trim() ?? '');
+
+	$effect(() => {
+		if (!requestedUrl || !isValidUrl(requestedUrl)) return;
+		if (requestedUrl === lastAnalyzedUrl) return;
+
+		url = requestedUrl;
+		lastAnalyzedUrl = requestedUrl;
 		loading = true;
 		error = '';
 		result = null;
 
-		try {
-			result = await analyzePwa(url.trim());
-		} catch (err) {
-			error = err instanceof Error ? err.message : 'Unknown error';
-		} finally {
-			loading = false;
-		}
-	}
+		void analyzePwa(requestedUrl)
+			.then((value) => {
+				result = value;
+			})
+			.catch((err: unknown) => {
+				error = err instanceof Error ? err.message : 'Unknown error';
+			})
+			.finally(() => {
+				loading = false;
+			});
+	});
 
 	const recommendations = $derived.by(() => {
 		if (!result) return [] as string[];

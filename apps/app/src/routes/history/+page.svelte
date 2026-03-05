@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { getHistory, startAnalysis } from '$lib/api';
+	import { getHistory, runResultPath, startAnalysis } from '$lib/api';
 	import type { HistoryListItem } from '$lib/api';
 	import { Button } from '@pagelens/ui/shadcn/button';
 
@@ -28,7 +28,7 @@
 				name: item.name,
 				analysis_type: item.analysis_type
 			});
-			goto(`/run/${run_id}`);
+			goto(runResultPath(run_id, item.analysis_type));
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to re-run analysis';
 			rerunning = null;
@@ -122,7 +122,7 @@
 				{#each history as item}
 					<div class="grid grid-cols-[1fr_110px_80px_80px_64px_64px_160px_80px] items-center px-4 py-3 hover:bg-secondary/30 transition-colors">
 						<div class="min-w-0 pr-4">
-							<a href="/run/{item.id}" class="group block">
+							<a href={runResultPath(item.id, item.analysis_type)} class="group block">
 								<div
 									class="truncate font-mono text-xs group-hover:text-primary transition-colors"
 								>

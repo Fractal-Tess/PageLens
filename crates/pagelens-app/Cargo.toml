@@ -14,6 +14,7 @@ pagelens-logging = { workspace = true }
 reqwest = { workspace = true }
 scraper = "0.22"
 image = "0.25"
+resvg = "0.45"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

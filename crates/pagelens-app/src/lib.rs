@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, Mutex, Semaphore};
 use tokio::task::AbortHandle;
 
@@ -43,6 +43,7 @@ pub enum AnalysisMode {
     Single,
     Crawl,
     HttpBenchmark,
+    Favicon,
 }
 
 impl Default for AnalysisMode {
@@ -245,11 +246,14 @@ pub struct FaviconCandidate {
     pub rel: String,
     pub sizes: Option<String>,
     pub mime_type: Option<String>,
+    pub media: Option<String>,
     pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FaviconAnalyzeResponse {
+    pub schema_version: String,
+    pub rule_version: String,
     pub input_url: String,
     pub resolved_page_url: String,
     pub default_favicon_url: String,
@@ -268,6 +272,7 @@ pub struct FaviconAnalyzeResponse {
     pub audit_messages: Vec<String>,
     pub candidate_reports: Vec<FaviconCandidateReport>,
     pub global_recommendations: Vec<String>,
+    pub report_v2: FaviconReportV2,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -276,6 +281,8 @@ pub struct FaviconCandidateReport {
     pub rel: String,
     pub source: String,
     pub mime_type: Option<String>,
+    pub media: Option<String>,
+    pub preferred_theme: Option<String>,
     pub declared_sizes: Option<String>,
     pub format: Option<String>,
     pub file_size_bytes: Option<u64>,
@@ -284,6 +291,114 @@ pub struct FaviconCandidateReport {
     pub contrast_on_dark: Option<f64>,
     pub issues: Vec<String>,
     pub recommendations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaviconReportV2 {
+    pub generated_at: String,
+    pub inventory: Vec<FaviconInventoryAsset>,
+    pub checks: Vec<FaviconAuditCheck>,
+    pub recommendations: Vec<FaviconRecommendation>,
+    pub score: FaviconScoreSummary,
+    pub top_actions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaviconInventoryAsset {
+    pub asset_id: String,
+    pub source: String,
+    pub rel: String,
+    pub href: String,
+    pub final_url: Option<String>,
+    pub media: Option<String>,
+    pub theme: FaviconTheme,
+    pub declared_mime_type: Option<String>,
+    pub declared_sizes: Option<String>,
+    pub format: Option<String>,
+    pub parsed_sizes: Vec<String>,
+    pub file_size_bytes: Option<u64>,
+    pub fetch_status: String,
+    pub contrast_on_light: Option<f64>,
+    pub contrast_on_dark: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FaviconTheme {
+    Light,
+    Dark,
+    LightDark,
+    Any,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaviconAuditCheck {
+    pub check_id: String,
+    pub rule_id: String,
+    pub category: String,
+    pub title: String,
+    pub subject_type: String,
+    pub subject_id: String,
+    pub status: FaviconCheckStatus,
+    pub severity: FaviconSeverity,
+    pub confidence: f64,
+    pub user_impact: String,
+    pub details: String,
+    pub evidence: Vec<FaviconEvidenceRef>,
+    pub recommendation_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaviconEvidenceRef {
+    pub kind: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FaviconCheckStatus {
+    Pass,
+    Warn,
+    Fail,
+    Info,
+    NotApplicable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum FaviconSeverity {
+    Critical,
+    High,
+    Medium,
+    Low,
+    Info,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaviconRecommendation {
+    pub recommendation_id: String,
+    pub action_key: String,
+    pub priority: FaviconSeverity,
+    pub title: String,
+    pub why: Vec<String>,
+    pub fix_steps: Vec<String>,
+    pub snippets: Vec<FaviconFixSnippet>,
+    pub related_check_ids: Vec<String>,
+    pub applies_to_assets: Vec<String>,
+    pub priority_score: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaviconFixSnippet {
+    pub language: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaviconScoreSummary {
+    pub score_0_100: u8,
+    pub grade: String,
+    pub highlights: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -579,6 +694,7 @@ impl AppService {
                     AnalysisMode::Single => AnalysisType::Single,
                     AnalysisMode::Crawl => AnalysisType::Crawl,
                     AnalysisMode::HttpBenchmark => AnalysisType::HttpBenchmark,
+                    AnalysisMode::Favicon => AnalysisType::Favicon,
                 },
                 payload_json: "{}".to_string(),
                 summary: AnalysisSummary::default(),
@@ -613,6 +729,11 @@ impl AppService {
                 AnalysisMode::HttpBenchmark => {
                     service
                         .execute_http_benchmark(run_id_for_task.clone(), input, tx.clone())
+                        .await
+                }
+                AnalysisMode::Favicon => {
+                    service
+                        .execute_favicon(run_id_for_task.clone(), input, tx.clone())
                         .await
                 }
             };
@@ -790,18 +911,35 @@ impl AppService {
             return Err(Error::Message("URL is required".to_string()));
         }
 
+        const PAGE_FETCH_TIMEOUT: Duration = Duration::from_secs(12);
+        const ICON_FETCH_TIMEOUT: Duration = Duration::from_secs(6);
+
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::limited(10))
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(PAGE_FETCH_TIMEOUT)
             .build()
             .map_err(|err| Error::Message(format!("Failed to build HTTP client: {err}")))?;
 
         let response = client
             .get(input_url)
+            .timeout(PAGE_FETCH_TIMEOUT)
             .send()
             .await
-            .map_err(|err| Error::Message(format!("Failed to fetch URL: {err}")))?
+            .map_err(|err| {
+                Error::Message(format!(
+                    "Target page is not reachable: {}",
+                    classify_reqwest_error(&err)
+                ))
+            })?
             .error_for_status()
-            .map_err(|err| Error::Message(format!("Page request failed: {err}")))?;
+            .map_err(|err| {
+                let reason = err
+                    .status()
+                    .map(|status| format!("HTTP {status}"))
+                    .unwrap_or_else(|| classify_reqwest_error(&err));
+                Error::Message(format!("Target page is not reachable: {reason}"))
+            })?;
 
         let resolved_page_url = response.url().clone();
         let html = response
@@ -873,6 +1011,7 @@ impl AppService {
                 }
 
                 let mime_type = element.value().attr("type").map(str::to_string);
+                let media = element.value().attr("media").map(str::to_string);
                 if ico_declared_url.is_none()
                     && (icon_url.to_ascii_lowercase().ends_with(".ico")
                         || mime_type
@@ -889,6 +1028,7 @@ impl AppService {
                     rel: rel_raw.to_string(),
                     sizes: element.value().attr("sizes").map(str::to_string),
                     mime_type,
+                    media,
                     source: "html_link".to_string(),
                 });
             }
@@ -919,6 +1059,7 @@ impl AppService {
                 rel: "icon".to_string(),
                 sizes: None,
                 mime_type: None,
+                media: None,
                 source: "default_path".to_string(),
             });
         }
@@ -954,7 +1095,7 @@ impl AppService {
         let mut ico_found = false;
         let mut ico_sizes = Vec::new();
 
-        match client.get(&ico_target_url).send().await {
+        match client.get(&ico_target_url).timeout(ICON_FETCH_TIMEOUT).send().await {
             Ok(resp) => {
                 if resp.status().is_success() {
                     ico_found = true;
@@ -967,9 +1108,19 @@ impl AppService {
                         }
                         Err(err) => warnings.push(format!("Failed to read ICO bytes: {err}")),
                     }
+                } else {
+                    warnings.push(format!(
+                        "ICO resource is not reachable: {} returned HTTP {}",
+                        ico_target_url,
+                        resp.status()
+                    ));
                 }
             }
-            Err(err) => warnings.push(format!("Failed to fetch ICO favicon: {err}")),
+            Err(err) => warnings.push(format!(
+                "ICO resource is not reachable: {} ({})",
+                ico_target_url,
+                classify_reqwest_error(&err)
+            )),
         }
 
         let required_ico_sizes = ["48x48", "32x32", "16x16"];
@@ -989,15 +1140,31 @@ impl AppService {
             let mut issues = Vec::new();
             let mut recommendations = Vec::new();
             let detected_format = detect_icon_format(candidate.mime_type.as_deref(), &candidate.url);
+            let preferred_theme = detect_preferred_theme(candidate.media.as_deref());
             let mut file_size_bytes = None;
             let mut detected_dimensions = Vec::new();
             let mut contrast_on_light = None;
             let mut contrast_on_dark = None;
+            let serves_light_theme = !matches!(preferred_theme.as_deref(), Some("dark"));
+            let serves_dark_theme = !matches!(preferred_theme.as_deref(), Some("light"));
 
-            match client.get(&candidate.url).send().await {
+            if preferred_theme.is_none() {
+                recommendations.push(
+                    "Declare media='(prefers-color-scheme: light)' or '(prefers-color-scheme: dark)' so browsers can pick a theme-specific favicon"
+                        .to_string(),
+                );
+            }
+
+            match client
+                .get(&candidate.url)
+                .timeout(ICON_FETCH_TIMEOUT)
+                .send()
+                .await
+            {
                 Ok(resp) => {
-                    if let Ok(ok_resp) = resp.error_for_status() {
-                        match ok_resp.bytes().await {
+                    let status = resp.status();
+                    if status.is_success() {
+                        match resp.bytes().await {
                             Ok(bytes) => {
                                 let bytes_vec = bytes.to_vec();
                                 file_size_bytes = Some(bytes_vec.len() as u64);
@@ -1020,21 +1187,24 @@ impl AppService {
                                         .iter()
                                         .map(|(w, h)| format!("{w}x{h}"))
                                         .collect();
-                                } else if detected_format.as_deref() == Some("svg") {
-                                    recommendations.push(
-                                        "Verify SVG contrast manually for both light and dark surfaces"
-                                            .to_string(),
-                                    );
-                                } else if let Ok(image) = image::load_from_memory(&bytes_vec) {
-                                    detected_dimensions = vec![format!(
-                                        "{}x{}",
-                                        image.width(),
-                                        image.height()
-                                    )];
+                                }
+
+                                if let Some(image) = decode_icon_image_for_contrast(
+                                    &bytes_vec,
+                                    detected_format.as_deref(),
+                                ) {
+                                    if detected_dimensions.is_empty() {
+                                        detected_dimensions = vec![format!(
+                                            "{}x{}",
+                                            image.width(),
+                                            image.height()
+                                        )];
+                                    }
+
                                     let (light_ratio, dark_ratio) = estimate_icon_contrast(&image);
                                     contrast_on_light = Some(light_ratio);
                                     contrast_on_dark = Some(dark_ratio);
-                                    if light_ratio < 2.2 {
+                                    if serves_light_theme && light_ratio < 2.2 {
                                         issues.push(format!(
                                             "Low contrast on light background ({light_ratio:.2}:1)"
                                         ));
@@ -1043,7 +1213,7 @@ impl AppService {
                                                 .to_string(),
                                         );
                                     }
-                                    if dark_ratio < 2.2 {
+                                    if serves_dark_theme && dark_ratio < 2.2 {
                                         issues.push(format!(
                                             "Low contrast on dark background ({dark_ratio:.2}:1)"
                                         ));
@@ -1052,18 +1222,30 @@ impl AppService {
                                                 .to_string(),
                                         );
                                     }
+                                } else {
+                                    recommendations.push(
+                                        "Could not render icon for contrast analysis"
+                                            .to_string(),
+                                    );
                                 }
                             }
                             Err(err) => {
-                                issues.push(format!("Failed to read icon bytes: {err}"));
+                                issues.push(format!(
+                                    "Icon resource is not reachable: failed to read bytes ({err})"
+                                ));
                             }
                         }
                     } else {
-                        issues.push("Icon URL returned non-success status".to_string());
+                        issues.push(format!(
+                            "Icon resource is not reachable: returned HTTP {status}"
+                        ));
                     }
                 }
                 Err(err) => {
-                    issues.push(format!("Icon URL fetch failed: {err}"));
+                    issues.push(format!(
+                        "Icon resource is not reachable: {}",
+                        classify_reqwest_error(&err)
+                    ));
                 }
             }
 
@@ -1083,6 +1265,8 @@ impl AppService {
                 rel: candidate.rel.clone(),
                 source: candidate.source.clone(),
                 mime_type: candidate.mime_type.clone(),
+                media: candidate.media.clone(),
+                preferred_theme,
                 declared_sizes: candidate.sizes.clone(),
                 format: detected_format,
                 file_size_bytes,
@@ -1150,6 +1334,15 @@ impl AppService {
             "No web app manifest".to_string()
         });
 
+        let has_theme_specific_favicon = candidate_reports
+            .iter()
+            .any(|report| report.preferred_theme.is_some());
+        audit_messages.push(if has_theme_specific_favicon {
+            "Theme-specific favicon variants declared".to_string()
+        } else {
+            "No theme-specific favicon variants declared".to_string()
+        });
+
         let mut global_recommendations = Vec::new();
         if !has_svg_favicon {
             global_recommendations
@@ -1181,6 +1374,31 @@ impl AppService {
                 ico_missing_sizes.join(", ")
             ));
         }
+        if !has_theme_specific_favicon {
+            global_recommendations.push(
+                "Provide favicon links with prefers-color-scheme media queries for light and dark themes"
+                    .to_string(),
+            );
+        }
+
+        let report_v2 = build_favicon_report_v2(
+            &resolved_page_url.to_string(),
+            &default_favicon_url,
+            &candidates,
+            &candidate_reports,
+            &warnings,
+            &audit_messages,
+            &global_recommendations,
+            has_svg_favicon,
+            has_desktop_png_favicon,
+            ico_declared,
+            ico_found,
+            &ico_sizes,
+            &ico_missing_sizes,
+            has_web_app_manifest,
+            has_touch_icon,
+            has_theme_specific_favicon,
+        );
 
         info!(
             input_url = %input_url,
@@ -1191,6 +1409,8 @@ impl AppService {
         );
 
         Ok(FaviconAnalyzeResponse {
+            schema_version: "favicon_report_v2".to_string(),
+            rule_version: "2026-03-05".to_string(),
             input_url: input_url.to_string(),
             resolved_page_url: resolved_page_url.to_string(),
             default_favicon_url,
@@ -1209,6 +1429,7 @@ impl AppService {
             audit_messages,
             candidate_reports,
             global_recommendations,
+            report_v2,
         })
     }
 
@@ -2140,6 +2361,89 @@ impl AppService {
 
         Ok(())
     }
+
+    async fn execute_favicon(
+        &self,
+        run_id: String,
+        input: AnalyseUrlInput,
+        tx: broadcast::Sender<RunEvent>,
+    ) -> Result<()> {
+        info!(run_id = %run_id, url = %input.url, "Executing favicon analysis");
+        let start = Instant::now();
+
+        {
+            let db = Database::open(&self.db_path)?;
+            if !db.analysis_repository().update_run_state_if_active(
+                &run_id,
+                AnalysisRunStatus::Running,
+                Some("favicon"),
+                Some("Analyzing favicon declarations and icon candidates"),
+                Some(0.2),
+            )? {
+                return Ok(());
+            }
+        }
+        let _ = tx.send(RunEvent::progress(
+            &run_id,
+            "favicon",
+            "Analyzing favicon declarations and icon candidates".to_string(),
+            Some(0.2),
+        ));
+
+        let result = self
+            .analyze_favicon(FaviconAnalyzeInput {
+                url: input.url.clone(),
+            })
+            .await?;
+
+        let payload_json = serde_json::to_string(&result)?;
+        let error_count = result
+            .report_v2
+            .checks
+            .iter()
+            .filter(|check| matches!(check.status, FaviconCheckStatus::Fail))
+            .count() as u32;
+        let warning_count = result
+            .report_v2
+            .checks
+            .iter()
+            .filter(|check| matches!(check.status, FaviconCheckStatus::Warn))
+            .count() as u32;
+        let summary = AnalysisSummary {
+            seo_score: None,
+            page_count: 1,
+            total_issues: error_count + warning_count,
+            error_count,
+            warning_count,
+            duration_ms: start.elapsed().as_millis() as u32,
+        };
+
+        {
+            let db = Database::open(&self.db_path)?;
+            if !db
+                .analysis_repository()
+                .complete_run_if_active(&run_id, &payload_json, &summary)?
+            {
+                return Ok(());
+            }
+        }
+
+        let _ = tx.send(RunEvent::completed_with_counts(
+            &run_id,
+            1,
+            if error_count == 0 { 1 } else { 0 },
+            if error_count > 0 { 1 } else { 0 },
+        ));
+        info!(
+            run_id = %run_id,
+            duration_ms = start.elapsed().as_millis() as u64,
+            warnings = warning_count,
+            errors = error_count,
+            "Favicon analysis completed"
+        );
+
+        Ok(())
+    }
 }
 
 /// Insert an asset record via spawn_blocking (Database is not Send).
@@ -2354,6 +2658,879 @@ fn extension_from_content_type_or_url(content_type: Option<&str>, url: &str) -> 
         .unwrap_or_default()
 }
 
+fn classify_reqwest_error(err: &reqwest::Error) -> String {
+    if err.is_timeout() {
+        return "request timed out".to_string();
+    }
+    if err.is_connect() {
+        return "connection failed".to_string();
+    }
+    if err.is_request() {
+        return "request setup failed".to_string();
+    }
+    if err.is_decode() {
+        return "response decode failed".to_string();
+    }
+    err.to_string()
+}
+
+fn has_unreachable_issue(issues: &[String]) -> bool {
+    issues.iter().any(|issue| {
+        let lower = issue.to_ascii_lowercase();
+        lower.contains("not reachable")
+            || lower.contains("returned http")
+            || lower.contains("timed out")
+            || lower.contains("connection failed")
+    })
+}
+
+fn build_favicon_report_v2(
+    resolved_page_url: &str,
+    default_favicon_url: &str,
+    candidates: &[FaviconCandidate],
+    candidate_reports: &[FaviconCandidateReport],
+    warnings: &[String],
+    audit_messages: &[String],
+    global_recommendations: &[String],
+    has_svg_favicon: bool,
+    has_desktop_png_favicon: bool,
+    ico_declared: bool,
+    ico_found: bool,
+    ico_sizes: &[String],
+    ico_missing_sizes: &[String],
+    has_web_app_manifest: bool,
+    has_touch_icon: bool,
+    has_theme_specific_favicon: bool,
+) -> FaviconReportV2 {
+    let generated_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_else(|_| "0".to_string());
+
+    let mut inventory = Vec::new();
+    let mut asset_id_by_url = HashMap::new();
+    for (idx, report) in candidate_reports.iter().enumerate() {
+        let asset_id = format!("asset_{}", idx + 1);
+        asset_id_by_url.insert(report.url.clone(), asset_id.clone());
+
+        let theme = match report.preferred_theme.as_deref() {
+            Some("light") => FaviconTheme::Light,
+            Some("dark") => FaviconTheme::Dark,
+            Some("light+dark") => FaviconTheme::LightDark,
+            _ => FaviconTheme::Any,
+        };
+
+        let fetch_status = if has_unreachable_issue(&report.issues) {
+            "failed".to_string()
+        } else {
+            "ok".to_string()
+        };
+
+        inventory.push(FaviconInventoryAsset {
+            asset_id,
+            source: report.source.clone(),
+            rel: report.rel.clone(),
+            href: report.url.clone(),
+            final_url: Some(report.url.clone()),
+            media: report.media.clone(),
+            theme,
+            declared_mime_type: report.mime_type.clone(),
+            declared_sizes: report.declared_sizes.clone(),
+            format: report.format.clone(),
+            parsed_sizes: report.detected_dimensions.clone(),
+            file_size_bytes: report.file_size_bytes,
+            fetch_status,
+            contrast_on_light: report.contrast_on_light,
+            contrast_on_dark: report.contrast_on_dark,
+        });
+    }
+
+    let mut checks = Vec::new();
+    let mut check_counter: usize = 1;
+    let mut add_check = |rule_id: &str,
+                         category: &str,
+                         title: &str,
+                         subject_type: &str,
+                         subject_id: &str,
+                         status: FaviconCheckStatus,
+                         severity: FaviconSeverity,
+                         details: String,
+                         evidence: Vec<FaviconEvidenceRef>,
+                         recommendation_ids: Vec<String>| {
+        let check_id = format!("check_{check_counter:03}");
+        check_counter += 1;
+        checks.push(FaviconAuditCheck {
+            check_id,
+            rule_id: rule_id.to_string(),
+            category: category.to_string(),
+            title: title.to_string(),
+            subject_type: subject_type.to_string(),
+            subject_id: subject_id.to_string(),
+            status,
+            severity,
+            confidence: 0.95,
+            user_impact: "favicon discoverability and visibility".to_string(),
+            details,
+            evidence,
+            recommendation_ids,
+        });
+    };
+
+    let discoverable = !candidates.is_empty() || ico_found;
+    add_check(
+        "favicon.discoverable",
+        "discovery",
+        "Favicon discoverable",
+        "site",
+        "root",
+        if discoverable {
+            FaviconCheckStatus::Pass
+        } else {
+            FaviconCheckStatus::Fail
+        },
+        FaviconSeverity::Critical,
+        if discoverable {
+            "At least one favicon candidate was discovered".to_string()
+        } else {
+            "No declared favicon and no default /favicon.ico detected".to_string()
+        },
+        vec![FaviconEvidenceRef {
+            kind: "page_url".to_string(),
+            value: resolved_page_url.to_string(),
+        }],
+        if discoverable {
+            Vec::new()
+        } else {
+            vec!["rec_add_favicon_declaration".to_string()]
+        },
+    );
+
+    let has_fetch_errors = candidate_reports
+        .iter()
+        .any(|report| has_unreachable_issue(&report.issues));
+    add_check(
+        "icons.fetchable",
+        "availability",
+        "Declared icon URLs are fetchable",
+        "site",
+        "root",
+        if has_fetch_errors {
+            FaviconCheckStatus::Fail
+        } else {
+            FaviconCheckStatus::Pass
+        },
+        FaviconSeverity::High,
+        if has_fetch_errors {
+            "One or more icon URLs failed to fetch".to_string()
+        } else {
+            "All discovered icon URLs fetched successfully".to_string()
+        },
+        candidate_reports
+            .iter()
+            .map(|r| FaviconEvidenceRef {
+                kind: "icon_url".to_string(),
+                value: r.url.clone(),
+            })
+            .collect(),
+        if has_fetch_errors {
+            vec!["rec_fix_broken_icon_urls".to_string()]
+        } else {
+            Vec::new()
+        },
+    );
+
+    add_check(
+        "favicon.svg_declared",
+        "format",
+        "SVG favicon declared",
+        "site",
+        "root",
+        if has_svg_favicon {
+            FaviconCheckStatus::Pass
+        } else {
+            FaviconCheckStatus::Warn
+        },
+        FaviconSeverity::Info,
+        if has_svg_favicon {
+            "SVG favicon is available".to_string()
+        } else {
+            "SVG favicon is missing".to_string()
+        },
+        vec![],
+        if has_svg_favicon {
+            Vec::new()
+        } else {
+            vec!["rec_add_svg_favicon".to_string()]
+        },
+    );
+
+    add_check(
+        "favicon.png_fallback_present",
+        "format",
+        "PNG fallback available",
+        "site",
+        "root",
+        if has_desktop_png_favicon {
+            FaviconCheckStatus::Pass
+        } else {
+            FaviconCheckStatus::Warn
+        },
+        FaviconSeverity::Low,
+        if has_desktop_png_favicon {
+            "PNG fallback exists for broad compatibility".to_string()
+        } else {
+            "PNG fallback is missing".to_string()
+        },
+        vec![],
+        if has_desktop_png_favicon {
+            Vec::new()
+        } else {
+            vec!["rec_add_png_favicon".to_string()]
+        },
+    );
+
+    add_check(
+        "favicon.ico_present",
+        "format",
+        "ICO favicon present",
+        "site",
+        "root",
+        if ico_found {
+            FaviconCheckStatus::Pass
+        } else {
+            FaviconCheckStatus::Fail
+        },
+        FaviconSeverity::Medium,
+        if ico_found {
+            format!("ICO favicon available at {default_favicon_url}")
+        } else {
+            "No ICO favicon found".to_string()
+        },
+        vec![FaviconEvidenceRef {
+            kind: "default_ico".to_string(),
+            value: default_favicon_url.to_string(),
+        }],
+        if ico_found {
+            Vec::new()
+        } else {
+            vec!["rec_add_ico_favicon".to_string()]
+        },
+    );
+
+    add_check(
+        "favicon.ico_declared",
+        "format",
+        "ICO declared in HTML",
+        "site",
+        "root",
+        if ico_declared {
+            FaviconCheckStatus::Pass
+        } else {
+            FaviconCheckStatus::Warn
+        },
+        FaviconSeverity::Low,
+        if ico_declared {
+            "ICO favicon is explicitly declared in head".to_string()
+        } else {
+            "ICO exists but is not explicitly declared in head".to_string()
+        },
+        vec![],
+        if ico_declared {
+            Vec::new()
+        } else {
+            vec!["rec_declare_ico_in_html".to_string()]
+        },
+    );
+
+    let has_ico_16 = ico_sizes.iter().any(|s| s == "16x16");
+    let has_ico_32 = ico_sizes.iter().any(|s| s == "32x32");
+    add_check(
+        "ico.contains_16_and_32",
+        "sizes",
+        "ICO includes 16x16 and 32x32",
+        "site",
+        "root",
+        if !ico_found {
+            FaviconCheckStatus::NotApplicable
+        } else if has_ico_16 && has_ico_32 {
+            FaviconCheckStatus::Pass
+        } else {
+            FaviconCheckStatus::Warn
+        },
+        FaviconSeverity::Medium,
+        if !ico_found {
+            "Not applicable because no ICO favicon was found".to_string()
+        } else if has_ico_16 && has_ico_32 {
+            "ICO contains baseline legacy sizes".to_string()
+        } else {
+            format!(
+                "ICO is missing baseline sizes: {}",
+                ico_missing_sizes.join(", ")
+            )
+        },
+        vec![],
+        if !ico_found || (has_ico_16 && has_ico_32) {
+            Vec::new()
+        } else {
+            vec!["rec_add_ico_base_sizes".to_string()]
+        },
+    );
+
+    add_check(
+        "manifest.present",
+        "pwa",
+        "Web app manifest present",
+        "site",
+        "root",
+        if has_web_app_manifest {
+            FaviconCheckStatus::Pass
+        } else {
+            FaviconCheckStatus::Warn
+        },
+        FaviconSeverity::Medium,
+        if has_web_app_manifest {
+            "Manifest link is declared".to_string()
+        } else {
+            "Manifest link is missing".to_string()
+        },
+        vec![],
+        if has_web_app_manifest {
+            Vec::new()
+        } else {
+            vec!["rec_add_manifest".to_string()]
+        },
+    );
+
+    add_check(
+        "apple.touch_icon_present",
+        "apple",
+        "Apple touch icon present",
+        "site",
+        "root",
+        if has_touch_icon {
+            FaviconCheckStatus::Pass
+        } else {
+            FaviconCheckStatus::Warn
+        },
+        FaviconSeverity::Medium,
+        if has_touch_icon {
+            "Apple touch icon is declared".to_string()
+        } else {
+            "Apple touch icon is missing".to_string()
+        },
+        vec![],
+        if has_touch_icon {
+            Vec::new()
+        } else {
+            vec!["rec_add_apple_touch_icon".to_string()]
+        },
+    );
+
+    add_check(
+        "theme.variants_declared",
+        "theme",
+        "Theme-specific favicon variants",
+        "site",
+        "root",
+        if has_theme_specific_favicon {
+            FaviconCheckStatus::Pass
+        } else {
+            FaviconCheckStatus::Warn
+        },
+        FaviconSeverity::Info,
+        if has_theme_specific_favicon {
+            "Light and/or dark theme media variants were declared".to_string()
+        } else {
+            "No prefers-color-scheme favicon variants declared".to_string()
+        },
+        vec![],
+        if has_theme_specific_favicon {
+            Vec::new()
+        } else {
+            vec!["rec_add_theme_variants".to_string()]
+        },
+    );
+
+    let select_effective_icon_for_theme = |theme: &str| -> Option<&FaviconCandidateReport> {
+        let exact = candidate_reports.iter().find(|report| {
+            matches!(
+                (theme, report.preferred_theme.as_deref()),
+                ("light", Some("light")) | ("dark", Some("dark"))
+            )
+        });
+        if exact.is_some() {
+            return exact;
+        }
+
+        let dual = candidate_reports
+            .iter()
+            .find(|report| matches!(report.preferred_theme.as_deref(), Some("light+dark")));
+        if dual.is_some() {
+            return dual;
+        }
+
+        candidate_reports
+            .iter()
+            .find(|report| report.preferred_theme.is_none())
+    };
+
+    let effective_light_icon = select_effective_icon_for_theme("light");
+    let effective_dark_icon = select_effective_icon_for_theme("dark");
+
+    add_check(
+        "theme.coverage_light",
+        "theme",
+        "Theme coverage for light UI",
+        "site",
+        "root",
+        if effective_light_icon.is_some() {
+            FaviconCheckStatus::Pass
+        } else {
+            FaviconCheckStatus::Warn
+        },
+        FaviconSeverity::Medium,
+        if let Some(icon) = effective_light_icon {
+            format!("An icon is available for light UI via {}", icon.url)
+        } else {
+            "No icon can serve light UI; add a light variant or unthemed fallback".to_string()
+        },
+        vec![],
+        if effective_light_icon.is_some() {
+            Vec::new()
+        } else {
+            vec!["rec_add_theme_variants".to_string()]
+        },
+    );
+
+    add_check(
+        "theme.coverage_dark",
+        "theme",
+        "Theme coverage for dark UI",
+        "site",
+        "root",
+        if effective_dark_icon.is_some() {
+            FaviconCheckStatus::Pass
+        } else {
+            FaviconCheckStatus::Warn
+        },
+        FaviconSeverity::Medium,
+        if let Some(icon) = effective_dark_icon {
+            format!("An icon is available for dark UI via {}", icon.url)
+        } else {
+            "No icon can serve dark UI; add a dark variant or unthemed fallback".to_string()
+        },
+        vec![],
+        if effective_dark_icon.is_some() {
+            Vec::new()
+        } else {
+            vec!["rec_add_theme_variants".to_string()]
+        },
+    );
+
+    if let Some(light_icon) = effective_light_icon {
+        let asset_id = asset_id_by_url
+            .get(&light_icon.url)
+            .cloned()
+            .unwrap_or_else(|| "light_effective_icon".to_string());
+        add_check(
+            "contrast.effective_icon_on_light",
+            "contrast",
+            "Effective icon contrast on light background",
+            "asset",
+            &asset_id,
+            match light_icon.contrast_on_light {
+                Some(value) if value < 2.2 => FaviconCheckStatus::Fail,
+                Some(_) => FaviconCheckStatus::Pass,
+                None => FaviconCheckStatus::NotApplicable,
+            },
+            FaviconSeverity::High,
+            match light_icon.contrast_on_light {
+                Some(value) => format!(
+                    "Contrast on #ffffff is {value:.2}:1 for effective light icon {}",
+                    light_icon.url
+                ),
+                None => "Contrast not available for this icon format".to_string(),
+            },
+            vec![FaviconEvidenceRef {
+                kind: "icon_url".to_string(),
+                value: light_icon.url.clone(),
+            }],
+            match light_icon.contrast_on_light {
+                Some(value) if value < 2.2 => vec!["rec_improve_light_contrast".to_string()],
+                _ => Vec::new(),
+            },
+        );
+    }
+
+    if let Some(dark_icon) = effective_dark_icon {
+        let asset_id = asset_id_by_url
+            .get(&dark_icon.url)
+            .cloned()
+            .unwrap_or_else(|| "dark_effective_icon".to_string());
+        add_check(
+            "contrast.effective_icon_on_dark",
+            "contrast",
+            "Effective icon contrast on dark background",
+            "asset",
+            &asset_id,
+            match dark_icon.contrast_on_dark {
+                Some(value) if value < 2.2 => FaviconCheckStatus::Fail,
+                Some(_) => FaviconCheckStatus::Pass,
+                None => FaviconCheckStatus::NotApplicable,
+            },
+            FaviconSeverity::High,
+            match dark_icon.contrast_on_dark {
+                Some(value) => format!(
+                    "Contrast on #111111 is {value:.2}:1 for effective dark icon {}",
+                    dark_icon.url
+                ),
+                None => "Contrast not available for this icon format".to_string(),
+            },
+            vec![FaviconEvidenceRef {
+                kind: "icon_url".to_string(),
+                value: dark_icon.url.clone(),
+            }],
+            match dark_icon.contrast_on_dark {
+                Some(value) if value < 2.2 => vec!["rec_improve_dark_contrast".to_string()],
+                _ => Vec::new(),
+            },
+        );
+    }
+
+    for warning in warnings {
+        add_check(
+            "scan.warning",
+            "runtime",
+            "Scanner warning",
+            "site",
+            "root",
+            FaviconCheckStatus::Info,
+            FaviconSeverity::Low,
+            warning.clone(),
+            vec![],
+            Vec::new(),
+        );
+    }
+
+    for (idx, message) in audit_messages.iter().enumerate() {
+        add_check(
+            &format!("legacy.audit.{idx}"),
+            "legacy",
+            "Legacy audit message",
+            "site",
+            "root",
+            FaviconCheckStatus::Info,
+            FaviconSeverity::Info,
+            message.clone(),
+            vec![],
+            Vec::new(),
+        );
+    }
+
+    let mut recommendation_map: BTreeMap<String, FaviconRecommendation> = BTreeMap::new();
+    let mut add_recommendation = |action_key: String,
+                                  title: String,
+                                  priority: FaviconSeverity,
+                                  why: String,
+                                  related_check_id: Option<String>,
+                                  applies_to_asset: Option<String>,
+                                  snippets: Vec<FaviconFixSnippet>| {
+        if !recommendation_map.contains_key(&action_key) {
+            let recommendation_id = format!("rec_{}", recommendation_map.len() + 1);
+            recommendation_map.insert(
+                action_key.clone(),
+                FaviconRecommendation {
+                    recommendation_id,
+                    action_key: action_key.clone(),
+                    priority: priority.clone(),
+                    title,
+                    why: Vec::new(),
+                    fix_steps: vec!["Apply the snippet and rerun favicon analysis".to_string()],
+                    snippets,
+                    related_check_ids: Vec::new(),
+                    applies_to_assets: Vec::new(),
+                    priority_score: severity_priority_score(&priority),
+                },
+            );
+        }
+
+        let Some(entry) = recommendation_map.get_mut(&action_key) else {
+            return;
+        };
+
+        if !entry.why.iter().any(|existing| existing == &why) {
+            entry.why.push(why);
+        }
+        if let Some(check_id) = related_check_id {
+            if !entry.related_check_ids.iter().any(|existing| existing == &check_id) {
+                entry.related_check_ids.push(check_id);
+            }
+        }
+        if let Some(asset_id) = applies_to_asset {
+            if !entry.applies_to_assets.iter().any(|existing| existing == &asset_id) {
+                entry.applies_to_assets.push(asset_id);
+            }
+        }
+    };
+
+    for check in &checks {
+        for recommendation_id in &check.recommendation_ids {
+            let (title, snippets) = recommendation_template(recommendation_id);
+            add_recommendation(
+                recommendation_id.clone(),
+                title,
+                check.severity.clone(),
+                check.details.clone(),
+                Some(check.check_id.clone()),
+                if check.subject_type == "asset" {
+                    Some(check.subject_id.clone())
+                } else {
+                    None
+                },
+                snippets,
+            );
+        }
+    }
+
+    for recommendation in global_recommendations {
+        let key = format!(
+            "legacy_{}",
+            recommendation
+                .to_ascii_lowercase()
+                .chars()
+                .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+                .collect::<String>()
+        );
+        add_recommendation(
+            key,
+            recommendation.clone(),
+            recommendation_priority_from_text(recommendation),
+            "Derived from legacy recommendation stream".to_string(),
+            None,
+            None,
+            Vec::new(),
+        );
+    }
+
+    for report in candidate_reports {
+        if let Some(asset_id) = asset_id_by_url.get(&report.url) {
+            for recommendation in &report.recommendations {
+                let key = format!(
+                    "asset_{}_{}",
+                    asset_id,
+                    recommendation
+                        .to_ascii_lowercase()
+                        .chars()
+                        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+                        .collect::<String>()
+                );
+                add_recommendation(
+                    key,
+                    recommendation.clone(),
+                    recommendation_priority_from_text(recommendation),
+                    format!("Triggered by {}", report.url),
+                    None,
+                    Some(asset_id.clone()),
+                    Vec::new(),
+                );
+            }
+        }
+    }
+
+    let mut recommendations: Vec<FaviconRecommendation> = recommendation_map.into_values().collect();
+    recommendations.sort_by(|a, b| {
+        b.priority_score
+            .cmp(&a.priority_score)
+            .then_with(|| a.recommendation_id.cmp(&b.recommendation_id))
+    });
+
+    let mut score: i32 = 100;
+    for check in &checks {
+        let weight = severity_weight(&check.severity);
+        match check.status {
+            FaviconCheckStatus::Fail => score -= weight,
+            FaviconCheckStatus::Warn => score -= weight / 2,
+            _ => {}
+        }
+    }
+    let score = score.clamp(0, 100) as u8;
+    let grade = if score >= 90 {
+        "A"
+    } else if score >= 80 {
+        "B"
+    } else if score >= 70 {
+        "C"
+    } else if score >= 60 {
+        "D"
+    } else {
+        "F"
+    }
+    .to_string();
+
+    let highlights = vec![
+        format!("{} favicon assets discovered", inventory.len()),
+        format!(
+            "{} failing checks, {} warnings",
+            checks
+                .iter()
+                .filter(|check| matches!(check.status, FaviconCheckStatus::Fail))
+                .count(),
+            checks
+                .iter()
+                .filter(|check| matches!(check.status, FaviconCheckStatus::Warn))
+                .count()
+        ),
+        format!("{} deduplicated recommendations", recommendations.len()),
+    ];
+
+    let top_actions = recommendations
+        .iter()
+        .take(3)
+        .map(|recommendation| recommendation.recommendation_id.clone())
+        .collect();
+
+    FaviconReportV2 {
+        generated_at,
+        inventory,
+        checks,
+        recommendations,
+        score: FaviconScoreSummary {
+            score_0_100: score,
+            grade,
+            highlights,
+        },
+        top_actions,
+    }
+}
+
+fn severity_weight(severity: &FaviconSeverity) -> i32 {
+    match severity {
+        FaviconSeverity::Critical => 30,
+        FaviconSeverity::High => 20,
+        FaviconSeverity::Medium => 10,
+        FaviconSeverity::Low => 4,
+        FaviconSeverity::Info => 1,
+    }
+}
+
+fn severity_priority_score(severity: &FaviconSeverity) -> u16 {
+    match severity {
+        FaviconSeverity::Critical => 100,
+        FaviconSeverity::High => 80,
+        FaviconSeverity::Medium => 60,
+        FaviconSeverity::Low => 30,
+        FaviconSeverity::Info => 10,
+    }
+}
+
+fn recommendation_priority_from_text(value: &str) -> FaviconSeverity {
+    let lower = value.to_ascii_lowercase();
+    if lower.contains("missing") || lower.contains("add ") || lower.contains("contrast") {
+        return FaviconSeverity::High;
+    }
+    if lower.contains("should") || lower.contains("fallback") {
+        return FaviconSeverity::Medium;
+    }
+    FaviconSeverity::Low
+}
+
+fn recommendation_template(recommendation_id: &str) -> (String, Vec<FaviconFixSnippet>) {
+    match recommendation_id {
+        "rec_add_favicon_declaration" => (
+            "Declare at least one favicon in HTML".to_string(),
+            vec![FaviconFixSnippet {
+                language: "html".to_string(),
+                content: "<link rel=\"icon\" type=\"image/svg+xml\" href=\"/favicon.svg\" />"
+                    .to_string(),
+            }],
+        ),
+        "rec_fix_broken_icon_urls" => (
+            "Fix broken icon URLs".to_string(),
+            Vec::new(),
+        ),
+        "rec_add_svg_favicon" => (
+            "Add SVG favicon".to_string(),
+            vec![FaviconFixSnippet {
+                language: "html".to_string(),
+                content: "<link rel=\"icon\" type=\"image/svg+xml\" href=\"/favicon.svg\" />"
+                    .to_string(),
+            }],
+        ),
+        "rec_add_png_favicon" => (
+            "Add PNG fallback favicon".to_string(),
+            vec![FaviconFixSnippet {
+                language: "html".to_string(),
+                content: "<link rel=\"icon\" type=\"image/png\" sizes=\"32x32\" href=\"/favicon-32.png\" />"
+                    .to_string(),
+            }],
+        ),
+        "rec_add_ico_favicon" => (
+            "Add /favicon.ico".to_string(),
+            vec![FaviconFixSnippet {
+                language: "html".to_string(),
+                content: "<link rel=\"icon\" href=\"/favicon.ico\" sizes=\"any\" />"
+                    .to_string(),
+            }],
+        ),
+        "rec_declare_ico_in_html" => (
+            "Declare ICO in head".to_string(),
+            vec![FaviconFixSnippet {
+                language: "html".to_string(),
+                content: "<link rel=\"icon\" href=\"/favicon.ico\" sizes=\"any\" />"
+                    .to_string(),
+            }],
+        ),
+        "rec_add_ico_base_sizes" => (
+            "Add 16x16 and 32x32 ICO variants".to_string(),
+            Vec::new(),
+        ),
+        "rec_add_manifest" => (
+            "Add web app manifest".to_string(),
+            vec![
+                FaviconFixSnippet {
+                    language: "html".to_string(),
+                    content:
+                        "<link rel=\"manifest\" href=\"/site.webmanifest\" />".to_string(),
+                },
+                FaviconFixSnippet {
+                    language: "json".to_string(),
+                    content: "{\n  \"name\": \"My App\",\n  \"icons\": [\n    { \"src\": \"/android-chrome-192x192.png\", \"sizes\": \"192x192\", \"type\": \"image/png\" },\n    { \"src\": \"/android-chrome-512x512.png\", \"sizes\": \"512x512\", \"type\": \"image/png\" }\n  ]\n}"
+                        .to_string(),
+                },
+            ],
+        ),
+        "rec_add_apple_touch_icon" => (
+            "Add apple touch icon".to_string(),
+            vec![FaviconFixSnippet {
+                language: "html".to_string(),
+                content:
+                    "<link rel=\"apple-touch-icon\" sizes=\"180x180\" href=\"/apple-touch-icon.png\" />"
+                        .to_string(),
+            }],
+        ),
+        "rec_add_theme_variants" => (
+            "Add light/dark favicon variants".to_string(),
+            vec![FaviconFixSnippet {
+                language: "html".to_string(),
+                content: "<link rel=\"icon\" href=\"/favicon-light.svg\" media=\"(prefers-color-scheme: light)\" />\n<link rel=\"icon\" href=\"/favicon-dark.svg\" media=\"(prefers-color-scheme: dark)\" />"
+                    .to_string(),
+            }],
+        ),
+        "rec_improve_light_contrast" => (
+            "Improve default icon contrast on light UI".to_string(),
+            Vec::new(),
+        ),
+        "rec_improve_dark_contrast" => (
+            "Improve default icon contrast on dark UI".to_string(),
+            Vec::new(),
+        ),
+        _ => (
+            "Review and apply recommended favicon fix".to_string(),
+            Vec::new(),
+        ),
+    }
+}
+
 fn detect_icon_format(mime_type: Option<&str>, url: &str) -> Option<String> {
     let mime = mime_type.unwrap_or_default().to_ascii_lowercase();
     let url_lower = url.to_ascii_lowercase();
@@ -2377,9 +3554,73 @@ fn detect_icon_format(mime_type: Option<&str>, url: &str) -> Option<String> {
     None
 }
 
+fn detect_preferred_theme(media: Option<&str>) -> Option<String> {
+    let media_lower = media?.to_ascii_lowercase();
+    let has_dark = media_lower.contains("prefers-color-scheme") && media_lower.contains("dark");
+    let has_light = media_lower.contains("prefers-color-scheme") && media_lower.contains("light");
+
+    if has_dark && has_light {
+        return Some("light+dark".to_string());
+    }
+    if has_dark {
+        return Some("dark".to_string());
+    }
+    if has_light {
+        return Some("light".to_string());
+    }
+
+    None
+}
+
+fn decode_icon_image_for_contrast(bytes: &[u8], format: Option<&str>) -> Option<DynamicImage> {
+    if format == Some("svg") {
+        return render_svg_to_image(bytes);
+    }
+
+    if let Ok(image) = image::load_from_memory(bytes) {
+        return Some(image);
+    }
+
+    let image_format = match format {
+        Some("png") => Some(image::ImageFormat::Png),
+        Some("jpeg") => Some(image::ImageFormat::Jpeg),
+        Some("webp") => Some(image::ImageFormat::WebP),
+        Some("ico") => Some(image::ImageFormat::Ico),
+        _ => None,
+    };
+
+    image_format
+        .and_then(|kind| image::load_from_memory_with_format(bytes, kind).ok())
+}
+
+fn render_svg_to_image(bytes: &[u8]) -> Option<DynamicImage> {
+    let options = resvg::usvg::Options::default();
+    let tree = resvg::usvg::Tree::from_data(bytes, &options).ok()?;
+
+    let size = tree.size().to_int_size();
+    let max_dim = size.width().max(size.height()).max(1);
+    let target_dim = 128u32;
+    let scale = if max_dim > target_dim {
+        target_dim as f32 / max_dim as f32
+    } else {
+        1.0
+    };
+
+    let target_width = ((size.width() as f32 * scale).round() as u32).max(1);
+    let target_height = ((size.height() as f32 * scale).round() as u32).max(1);
+
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(target_width, target_height)?;
+    let transform = resvg::tiny_skia::Transform::from_scale(scale, scale);
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+
+    let rgba = image::RgbaImage::from_raw(target_width, target_height, pixmap.data().to_vec())?;
+    Some(DynamicImage::ImageRgba8(rgba))
+}
+
 fn estimate_icon_contrast(image: &DynamicImage) -> (f64, f64) {
     let rgba = image.to_rgba8();
-    let mut weighted_luminance_sum = 0.0f64;
+    let mut weighted_light_luminance_sum = 0.0f64;
+    let mut weighted_dark_luminance_sum = 0.0f64;
     let mut alpha_sum = 0.0f64;
 
     for pixel in rgba.pixels() {
@@ -2388,23 +3629,44 @@ fn estimate_icon_contrast(image: &DynamicImage) -> (f64, f64) {
         if alpha <= 0.0 {
             continue;
         }
-        let r_lin = srgb_to_linear(f64::from(r) / 255.0);
-        let g_lin = srgb_to_linear(f64::from(g) / 255.0);
-        let b_lin = srgb_to_linear(f64::from(b) / 255.0);
-        let luminance = 0.2126 * r_lin + 0.7152 * g_lin + 0.0722 * b_lin;
-        weighted_luminance_sum += luminance * alpha;
+        let r_srgb = f64::from(r) / 255.0;
+        let g_srgb = f64::from(g) / 255.0;
+        let b_srgb = f64::from(b) / 255.0;
+
+        let r_on_light = blend_srgb_over_background(r_srgb, alpha, 1.0);
+        let g_on_light = blend_srgb_over_background(g_srgb, alpha, 1.0);
+        let b_on_light = blend_srgb_over_background(b_srgb, alpha, 1.0);
+
+        let r_on_dark = blend_srgb_over_background(r_srgb, alpha, 0.0);
+        let g_on_dark = blend_srgb_over_background(g_srgb, alpha, 0.0);
+        let b_on_dark = blend_srgb_over_background(b_srgb, alpha, 0.0);
+
+        let luminance_on_light = 0.2126 * srgb_to_linear(r_on_light)
+            + 0.7152 * srgb_to_linear(g_on_light)
+            + 0.0722 * srgb_to_linear(b_on_light);
+        let luminance_on_dark = 0.2126 * srgb_to_linear(r_on_dark)
+            + 0.7152 * srgb_to_linear(g_on_dark)
+            + 0.0722 * srgb_to_linear(b_on_dark);
+
+        weighted_light_luminance_sum += luminance_on_light * alpha;
+        weighted_dark_luminance_sum += luminance_on_dark * alpha;
         alpha_sum += alpha;
     }
 
-    let avg_luminance = if alpha_sum > 0.0 {
-        weighted_luminance_sum / alpha_sum
-    } else {
-        0.5
-    };
+    if alpha_sum <= 0.0 {
+        return (1.0, 1.0);
+    }
 
-    let contrast_on_light = (1.0 + 0.05) / (avg_luminance + 0.05);
-    let contrast_on_dark = (avg_luminance + 0.05) / 0.05;
+    let avg_luminance_on_light = weighted_light_luminance_sum / alpha_sum;
+    let avg_luminance_on_dark = weighted_dark_luminance_sum / alpha_sum;
+
+    let contrast_on_light = (1.0 + 0.05) / (avg_luminance_on_light + 0.05);
+    let contrast_on_dark = (avg_luminance_on_dark + 0.05) / 0.05;
     (contrast_on_light, contrast_on_dark)
+}
+
+fn blend_srgb_over_background(fg: f64, alpha: f64, bg: f64) -> f64 {
+    fg * alpha + bg * (1.0 - alpha)
 }
 
 fn srgb_to_linear(channel: f64) -> f64 {
@@ -2451,4 +3713,338 @@ fn parse_ico_sizes(bytes: &[u8]) -> Vec<(u16, u16)> {
     sizes.sort_unstable();
     sizes.dedup();
     sizes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_preferred_theme_from_media_query() {
+        assert_eq!(
+            detect_preferred_theme(Some("(prefers-color-scheme: dark)")),
+            Some("dark".to_string())
+        );
+        assert_eq!(
+            detect_preferred_theme(Some("screen and (prefers-color-scheme: light)")),
+            Some("light".to_string())
+        );
+        assert_eq!(
+            detect_preferred_theme(Some("(prefers-color-scheme: light) and (prefers-color-scheme: dark)")),
+            Some("light+dark".to_string())
+        );
+        assert_eq!(detect_preferred_theme(Some("screen")), None);
+    }
+
+    #[test]
+    fn rendered_contrast_distinguishes_black_and_white_icons() {
+        let mut black_icon = image::RgbaImage::new(4, 4);
+        for pixel in black_icon.pixels_mut() {
+            *pixel = image::Rgba([0, 0, 0, 255]);
+        }
+        let black_icon = DynamicImage::ImageRgba8(black_icon);
+        let (black_on_light, black_on_dark) = estimate_icon_contrast(&black_icon);
+        assert!(black_on_light > 10.0);
+        assert!(black_on_dark < 1.5);
+
+        let mut white_icon = image::RgbaImage::new(4, 4);
+        for pixel in white_icon.pixels_mut() {
+            *pixel = image::Rgba([255, 255, 255, 255]);
+        }
+        let white_icon = DynamicImage::ImageRgba8(white_icon);
+        let (white_on_light, white_on_dark) = estimate_icon_contrast(&white_icon);
+        assert!(white_on_light < 1.5);
+        assert!(white_on_dark > 10.0);
+    }
+
+    #[test]
+    fn transparent_icons_return_neutral_contrast() {
+        let transparent = image::RgbaImage::from_pixel(2, 2, image::Rgba([255, 0, 0, 0]));
+        let icon = DynamicImage::ImageRgba8(transparent);
+        let (on_light, on_dark) = estimate_icon_contrast(&icon);
+        assert_eq!(on_light, 1.0);
+        assert_eq!(on_dark, 1.0);
+    }
+
+    #[test]
+    fn svg_icons_can_be_rendered_for_contrast_analysis() {
+        let svg = br#"<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><rect width='32' height='32' fill='#000000'/></svg>"#;
+        let image = decode_icon_image_for_contrast(svg, Some("svg"));
+        assert!(image.is_some());
+
+        let (on_light, on_dark) = estimate_icon_contrast(&image.expect("svg should render"));
+        assert!(on_light > 10.0);
+        assert!(on_dark < 1.5);
+    }
+
+    #[test]
+    fn ffmpeg_generated_png_jpg_ico_icons_decode_for_contrast() {
+        let png = include_bytes!("../tests/fixtures/icons/contrast-test.png");
+        let jpg = include_bytes!("../tests/fixtures/icons/contrast-test.jpg");
+        let ico = include_bytes!("../tests/fixtures/icons/contrast-test.ico");
+
+        let png_image = decode_icon_image_for_contrast(png, Some("png"));
+        let jpg_image = decode_icon_image_for_contrast(jpg, Some("jpeg"));
+        let ico_image = decode_icon_image_for_contrast(ico, Some("ico"));
+
+        assert!(png_image.is_some());
+        assert!(jpg_image.is_some());
+        assert!(ico_image.is_some());
+
+        let (png_light, png_dark) = estimate_icon_contrast(&png_image.expect("png image"));
+        let (jpg_light, jpg_dark) = estimate_icon_contrast(&jpg_image.expect("jpg image"));
+        let (ico_light, ico_dark) = estimate_icon_contrast(&ico_image.expect("ico image"));
+
+        assert!(png_light > 1.0 && png_dark > 1.0);
+        assert!(jpg_light > 1.0 && jpg_dark > 1.0);
+        assert!(ico_light > 1.0 && ico_dark > 1.0);
+    }
+
+    #[test]
+    fn report_v2_contains_atomic_checks_and_deduped_recommendations() {
+        let candidates = vec![FaviconCandidate {
+            url: "https://example.test/favicon.ico".to_string(),
+            rel: "icon".to_string(),
+            sizes: Some("16x16 32x32".to_string()),
+            mime_type: Some("image/x-icon".to_string()),
+            media: None,
+            source: "default_path".to_string(),
+        }];
+
+        let candidate_reports = vec![FaviconCandidateReport {
+            url: "https://example.test/favicon.ico".to_string(),
+            rel: "icon".to_string(),
+            source: "default_path".to_string(),
+            mime_type: Some("image/x-icon".to_string()),
+            media: None,
+            preferred_theme: None,
+            declared_sizes: Some("16x16 32x32".to_string()),
+            format: Some("ico".to_string()),
+            file_size_bytes: Some(4096),
+            detected_dimensions: vec!["16x16".to_string(), "32x32".to_string()],
+            contrast_on_light: Some(11.0),
+            contrast_on_dark: Some(1.0),
+            issues: vec!["Low contrast on dark background (1.00:1)".to_string()],
+            recommendations: vec![
+                "Increase icon edge contrast for dark themes".to_string(),
+                "Increase icon edge contrast for dark themes".to_string(),
+            ],
+        }];
+
+        let report = build_favicon_report_v2(
+            "https://example.test",
+            "https://example.test/favicon.ico",
+            &candidates,
+            &candidate_reports,
+            &[],
+            &[],
+            &["Add a web app manifest with at least 192x192 and 512x512 icons".to_string()],
+            false,
+            false,
+            false,
+            true,
+            &["16x16".to_string(), "32x32".to_string()],
+            &[],
+            false,
+            false,
+            false,
+        );
+
+        assert!(!report.inventory.is_empty());
+        assert!(report
+            .checks
+            .iter()
+            .any(|check| check.rule_id == "contrast.effective_icon_on_dark"));
+        assert!(report
+            .recommendations
+            .iter()
+            .any(|recommendation| recommendation.title.contains("manifest")));
+        let deduped_dark_contrast_recommendations = report
+            .recommendations
+            .iter()
+            .filter(|recommendation| {
+                recommendation
+                    .title
+                    .contains("Increase icon edge contrast for dark themes")
+            })
+            .count();
+        assert_eq!(deduped_dark_contrast_recommendations, 1);
+        assert!(!report.top_actions.is_empty());
+    }
+
+    #[test]
+    fn effective_dark_icon_prefers_dark_variant_over_default_fallback() {
+        let candidates = vec![
+            FaviconCandidate {
+                url: "https://example.test/favicon.ico".to_string(),
+                rel: "icon".to_string(),
+                sizes: None,
+                mime_type: Some("image/x-icon".to_string()),
+                media: None,
+                source: "default_path".to_string(),
+            },
+            FaviconCandidate {
+                url: "https://example.test/favicon-dark.svg".to_string(),
+                rel: "icon".to_string(),
+                sizes: None,
+                mime_type: Some("image/svg+xml".to_string()),
+                media: Some("(prefers-color-scheme: dark)".to_string()),
+                source: "html_link".to_string(),
+            },
+        ];
+
+        let candidate_reports = vec![
+            FaviconCandidateReport {
+                url: "https://example.test/favicon.ico".to_string(),
+                rel: "icon".to_string(),
+                source: "default_path".to_string(),
+                mime_type: Some("image/x-icon".to_string()),
+                media: None,
+                preferred_theme: None,
+                declared_sizes: None,
+                format: Some("ico".to_string()),
+                file_size_bytes: Some(4096),
+                detected_dimensions: vec!["32x32".to_string()],
+                contrast_on_light: Some(11.0),
+                contrast_on_dark: Some(1.0),
+                issues: vec!["Low contrast on dark background (1.00:1)".to_string()],
+                recommendations: vec!["Increase icon edge contrast for dark themes".to_string()],
+            },
+            FaviconCandidateReport {
+                url: "https://example.test/favicon-dark.svg".to_string(),
+                rel: "icon".to_string(),
+                source: "html_link".to_string(),
+                mime_type: Some("image/svg+xml".to_string()),
+                media: Some("(prefers-color-scheme: dark)".to_string()),
+                preferred_theme: Some("dark".to_string()),
+                declared_sizes: None,
+                format: Some("svg".to_string()),
+                file_size_bytes: Some(1200),
+                detected_dimensions: vec!["32x32".to_string()],
+                contrast_on_light: Some(1.1),
+                contrast_on_dark: Some(19.0),
+                issues: vec![],
+                recommendations: vec![],
+            },
+        ];
+
+        let report = build_favicon_report_v2(
+            "https://example.test",
+            "https://example.test/favicon.ico",
+            &candidates,
+            &candidate_reports,
+            &[],
+            &[],
+            &[],
+            true,
+            false,
+            false,
+            true,
+            &[],
+            &[],
+            false,
+            false,
+            true,
+        );
+
+        let dark_check = report
+            .checks
+            .iter()
+            .find(|check| check.rule_id == "contrast.effective_icon_on_dark")
+            .expect("dark contrast check should exist");
+
+        assert!(matches!(dark_check.status, FaviconCheckStatus::Pass));
+        assert!(dark_check
+            .details
+            .contains("https://example.test/favicon-dark.svg"));
+        assert!(dark_check.recommendation_ids.is_empty());
+    }
+
+    #[test]
+    fn effective_dark_icon_uses_fallback_when_only_light_variant_exists() {
+        let candidates = vec![
+            FaviconCandidate {
+                url: "https://example.test/favicon.ico".to_string(),
+                rel: "icon".to_string(),
+                sizes: None,
+                mime_type: Some("image/x-icon".to_string()),
+                media: None,
+                source: "default_path".to_string(),
+            },
+            FaviconCandidate {
+                url: "https://example.test/favicon-light.svg".to_string(),
+                rel: "icon".to_string(),
+                sizes: None,
+                mime_type: Some("image/svg+xml".to_string()),
+                media: Some("(prefers-color-scheme: light)".to_string()),
+                source: "html_link".to_string(),
+            },
+        ];
+
+        let candidate_reports = vec![
+            FaviconCandidateReport {
+                url: "https://example.test/favicon.ico".to_string(),
+                rel: "icon".to_string(),
+                source: "default_path".to_string(),
+                mime_type: Some("image/x-icon".to_string()),
+                media: None,
+                preferred_theme: None,
+                declared_sizes: None,
+                format: Some("ico".to_string()),
+                file_size_bytes: Some(4096),
+                detected_dimensions: vec!["32x32".to_string()],
+                contrast_on_light: Some(10.0),
+                contrast_on_dark: Some(1.0),
+                issues: vec![],
+                recommendations: vec![],
+            },
+            FaviconCandidateReport {
+                url: "https://example.test/favicon-light.svg".to_string(),
+                rel: "icon".to_string(),
+                source: "html_link".to_string(),
+                mime_type: Some("image/svg+xml".to_string()),
+                media: Some("(prefers-color-scheme: light)".to_string()),
+                preferred_theme: Some("light".to_string()),
+                declared_sizes: None,
+                format: Some("svg".to_string()),
+                file_size_bytes: Some(1200),
+                detected_dimensions: vec!["32x32".to_string()],
+                contrast_on_light: Some(18.0),
+                contrast_on_dark: Some(1.1),
+                issues: vec![],
+                recommendations: vec![],
+            },
+        ];
+
+        let report = build_favicon_report_v2(
+            "https://example.test",
+            "https://example.test/favicon.ico",
+            &candidates,
+            &candidate_reports,
+            &[],
+            &[],
+            &[],
+            true,
+            false,
+            false,
+            true,
+            &[],
+            &[],
+            false,
+            false,
+            true,
+        );
+
+        let dark_check = report
+            .checks
+            .iter()
+            .find(|check| check.rule_id == "contrast.effective_icon_on_dark")
+            .expect("dark contrast check should exist");
+
+        assert!(matches!(dark_check.status, FaviconCheckStatus::Fail));
+        assert!(dark_check
+            .details
+            .contains("https://example.test/favicon.ico"));
+        assert_eq!(dark_check.recommendation_ids, vec!["rec_improve_dark_contrast"]);
+    }
 }
