@@ -32,6 +32,9 @@ jobs:
       - name: Validate CLI release tag
         run: nix develop .#default --command bash -lc './scripts/check-cli-release-tag.sh "${GITHUB_REF_NAME}"'
 
+      - name: Install workspace dependencies
+        run: nix develop .#default --command bash -lc 'bun install --frozen-lockfile'
+
       - name: Ensure tag commit is on the default branch
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -72,6 +75,12 @@ jobs:
         if: matrix.os == 'ubuntu-22.04'
         uses: cachix/install-nix-action@v31
 
+      - name: Setup Bun
+        if: matrix.os != 'ubuntu-22.04'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.0
+
       - name: Install Rust stable
         if: matrix.os != 'ubuntu-22.04'
         uses: dtolnay/rust-toolchain@stable
@@ -83,6 +92,14 @@ jobs:
         with:
           workspaces: |
             . -> target
+
+      - name: Install workspace dependencies in flake shell
+        if: matrix.os == 'ubuntu-22.04'
+        run: nix develop .#default --command bash -lc 'bun install --frozen-lockfile'
+
+      - name: Install workspace dependencies natively
+        if: matrix.os != 'ubuntu-22.04'
+        run: bun install --frozen-lockfile
 
       - name: Build CLI binary in flake shell
         if: matrix.os == 'ubuntu-22.04'
