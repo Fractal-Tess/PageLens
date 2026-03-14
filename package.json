@@ -28,7 +28,9 @@
     "svelte:build": "bun run --cwd apps/tauri svelte:build",
     "svelte:dev": "bun run --cwd apps/tauri svelte:dev",
     "start-apps": "turbo run start --filter='./test-apps/*' --ui=tui",
-    "start-test-apps": "bun run start-apps"
+    "start-test-apps": "bun run start-apps",
+    "release:cli:check-tag": "./scripts/check-cli-release-tag.sh",
+    "release:cli:create-tag": "./scripts/create-cli-release-tag.sh"
   },
   "engines": {
     "bun": ">=1.3.0"
