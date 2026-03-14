@@ -3382,7 +3382,7 @@ dependencies = [
 
 [[package]]
 name = "pagelens-api"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "axum",
  "pagelens-app",
@@ -3396,7 +3396,7 @@ dependencies = [
 
 [[package]]
 name = "pagelens-app"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "image",
  "pagelens-core",
@@ -3414,7 +3414,7 @@ dependencies = [
 
 [[package]]
 name = "pagelens-cli"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "axum",
  "clap",
@@ -3432,7 +3432,7 @@ dependencies = [
 
 [[package]]
 name = "pagelens-core"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "chromey",
@@ -3453,7 +3453,7 @@ dependencies = [
 
 [[package]]
 name = "pagelens-db"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "chrono",
  "pagelens-logging",
@@ -3469,7 +3469,7 @@ dependencies = [
 
 [[package]]
 name = "pagelens-desktop"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "pagelens-core",
  "pagelens-db",
@@ -3487,7 +3487,7 @@ dependencies = [
 
 [[package]]
 name = "pagelens-logging"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "tracing",
  "tracing-subscriber",
