@@ -61,8 +61,8 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             archive_extension: tar.gz
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
+          - os: ubuntu-22.04
+            target: x86_64-pc-windows-gnu
             archive_extension: zip
 
     runs-on: ${{ matrix.os }}
@@ -93,6 +93,16 @@ jobs:
           workspaces: |
             . -> target
 
+      - name: Install Windows GNU cross toolchain
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64 zip
+
+      - name: Add Windows GNU target
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        run: nix develop .#default --command bash -lc 'rustup target add x86_64-pc-windows-gnu'
+
       - name: Install workspace dependencies in flake shell
         if: matrix.os == 'ubuntu-22.04'
         run: nix develop .#default --command bash -lc 'bun install --frozen-lockfile'
@@ -110,7 +120,7 @@ jobs:
         run: cargo build --locked --release -p pagelens-cli --bin pagelens --target ${{ matrix.target }}
 
       - name: Package Unix archive
-        if: runner.os != 'Windows'
+        if: matrix.archive_extension == 'tar.gz'
         env:
           VERSION: ${{ needs.validate.outputs.version }}
           TARGET: ${{ matrix.target }}
@@ -122,18 +132,16 @@ jobs:
           tar -czf "${archive_root}.tar.gz" "$archive_root"
 
       - name: Package Windows archive
-        if: runner.os == 'Windows'
-        shell: pwsh
+        if: matrix.archive_extension == 'zip'
         env:
           VERSION: ${{ needs.validate.outputs.version }}
           TARGET: ${{ matrix.target }}
         run: |
-          $archiveRoot = "pagelens-v$env:VERSION-$env:TARGET"
-          New-Item -ItemType Directory -Path $archiveRoot | Out-Null
-          Copy-Item "target/$env:TARGET/release/pagelens.exe" "$archiveRoot/pagelens.exe"
-          Copy-Item "README.md" "$archiveRoot/README.md"
-          Copy-Item "LICENSE" "$archiveRoot/LICENSE"
-          Compress-Archive -Path $archiveRoot -DestinationPath "$archiveRoot.zip"
+          archive_root="pagelens-v${VERSION}-${TARGET}"
+          mkdir -p "$archive_root"
+          cp "target/${TARGET}/release/pagelens.exe" "$archive_root/pagelens.exe"
+          cp README.md LICENSE "$archive_root/"
+          zip -r "${archive_root}.zip" "$archive_root"
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
