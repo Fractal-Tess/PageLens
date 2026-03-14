@@ -2,6 +2,7 @@
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
+use std::process::Command;
 #[cfg(not(debug_assertions))]
 use std::net::SocketAddr;
 
@@ -31,9 +32,56 @@ pub fn open_browser_for_server(host: IpAddr, port: u16) {
     };
     let url = format!("http://{}:{}/", open_host, port);
     info!(url = %url, "Attempting to open browser for server mode");
-    if let Err(err) = webbrowser::open(&url) {
+    if let Err(err) = open_url(&url) {
         warn!(url = %url, error = %err, "Failed to open browser automatically");
         eprintln!("Warning: failed to open browser automatically: {err}");
+    }
+}
+
+fn open_url(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .status()
+            .map_err(|err| err.to_string())
+            .and_then(|status| {
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(format!("process exited with status {status}"))
+                }
+            })
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(url)
+            .status()
+            .map_err(|err| err.to_string())
+            .and_then(|status| {
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(format!("process exited with status {status}"))
+                }
+            })
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open")
+            .arg(url)
+            .status()
+            .map_err(|err| err.to_string())
+            .and_then(|status| {
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(format!("process exited with status {status}"))
+                }
+            })
     }
 }
 
