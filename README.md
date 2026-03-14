@@ -15,6 +15,8 @@ PageLens is a website analysis toolkit built with Rust, Tauri, and Svelte. It pr
 - Node.js `>= 20`
 - Rust stable toolchain
 
+Optional: use the pinned development environment from `flake.nix` with `nix develop`.
+
 Optional (Linux): install `mold` linker, or remove related rust flags in `apps/tauri/src-tauri/.cargo/config.toml`.
 
 ## Getting Started
@@ -23,6 +25,12 @@ Install dependencies:
 
 ```bash
 bun install
+```
+
+Or enter the Nix development shell first:
+
+```bash
+nix develop
 ```
 
 Build test applications:
@@ -52,6 +60,38 @@ cargo test -p pagelens-core -- --test-threads=1
 # Run CLI tests
 cargo test -p pagelens-cli --tests
 ```
+
+## CLI Releases
+
+CLI releases are built from Git tags by `.github/workflows/release-cli.yml`.
+
+`Cargo.toml` is the source of truth for CLI release versions. Release tags must match `workspace.package.version` there and use the format `cli-vX.Y.Z`.
+
+The helper scripts in `scripts/` require Python 3.11+ because they read TOML with `tomllib`.
+
+On Linux CI, the CLI release validation and Linux release build run inside the pinned Nix dev shell from `flake.nix` so GitHub Actions uses the same Rust/Bun/system-library environment as local development.
+
+Release a new CLI version with:
+
+```bash
+# 1. Update workspace.package.version in Cargo.toml and commit it.
+
+# 2. Verify the tag you are about to create matches Cargo.toml.
+bun run release:cli:check-tag -- cli-v0.1.0
+
+# 3. Create and push the release tag for the current Cargo.toml version.
+bun run release:cli:create-tag
+```
+
+When the tag is pushed, GitHub Actions will:
+
+- validate that the tag matches `workspace.package.version`
+- verify the tagged commit is reachable from the default branch
+- run `cargo test -p pagelens-cli --tests`
+- build `pagelens` for Linux, macOS, and Windows
+- attach the packaged binaries and `SHA256SUMS` to the GitHub Release
+
+Release assets follow the pattern `pagelens-vX.Y.Z-<target>.<archive>`.
 
 ## Integration Testing
 
