@@ -58,6 +58,12 @@ jobs:
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             archive_extension: tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive_extension: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_extension: zip
 
     runs-on: ${{ matrix.os }}
 
@@ -158,7 +164,7 @@ jobs:
             Automated release for the PageLens CLI.
 
             Assets:
-            - Linux binary archive
+            - Linux, macOS, and Windows binary archives
             - SHA256 checksums in `SHA256SUMS`
           files: |
             dist/pagelens-v${{ needs.validate.outputs.version }}-*

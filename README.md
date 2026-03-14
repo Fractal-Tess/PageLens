@@ -88,7 +88,7 @@ When the tag is pushed, GitHub Actions will:
 - validate that the tag matches `workspace.package.version`
 - verify the tagged commit is reachable from the default branch
 - run `cargo test -p pagelens-cli --tests`
-- build the Linux `pagelens` release archive on GitHub
+- build `pagelens` release archives for Linux, macOS, and Windows on GitHub
 - attach the packaged binaries and `SHA256SUMS` to the GitHub Release
 
 Release assets follow the pattern `pagelens-vX.Y.Z-<target>.<archive>`.
