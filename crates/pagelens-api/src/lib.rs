@@ -1,3 +1,4 @@
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -69,11 +70,13 @@ pub fn router(service: AppService) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/api/runs/analyse", post(start_analyse))
+        .route("/api/runs/active", get(list_active_runs))
         .route("/api/runs/{run_id}", get(get_run).patch(edit_run))
         .route("/api/runs/{run_id}/cancel", post(cancel_run))
         .route("/api/runs/{run_id}/pages", get(get_pages))
         .route("/api/runs/{run_id}/assets", get(get_run_assets))
         .route("/api/runs/{run_id}/events", get(run_events))
+        .route("/api/runs/{run_id}/ws", get(run_events_ws))
         .route("/api/history", get(list_history))
         .route("/api/tools/favicon", post(analyze_favicon))
         .route("/api/tools/pwa", post(analyze_pwa))
@@ -179,6 +182,15 @@ async fn list_history(
     Ok(Json(serde_json::json!(items)))
 }
 
+async fn list_active_runs(State(state): State<ApiState>) -> Result<Json<serde_json::Value>, ApiError> {
+    let runs = state
+        .service
+        .list_active_runs()
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(serde_json::json!(runs)))
+}
+
 async fn analyze_favicon(
     State(state): State<ApiState>,
     Json(input): Json<FaviconAnalyzeRequest>,
@@ -246,6 +258,88 @@ async fn run_events(
             Err(ApiError::from_app(err))
         }
     }
+}
+
+async fn run_events_ws(
+    State(state): State<ApiState>,
+    Path(run_id): Path<String>,
+    ws: WebSocketUpgrade,
+) -> Result<Response, ApiError> {
+    let rx = state.service.subscribe(&run_id).await;
+    let terminal_event = state
+        .service
+        .terminal_event_for_run(&run_id)
+        .map_err(ApiError::from_app)?;
+
+    if rx.is_none() && terminal_event.is_none() {
+        warn!(run_id = %run_id, "WebSocket requested for unknown run");
+        return Err(ApiError::not_found("Run not found"));
+    }
+
+    info!(run_id = %run_id, "Opening WebSocket stream for run events");
+    Ok(ws
+        .on_upgrade(move |socket| handle_run_events_ws(socket, rx, terminal_event))
+        .into_response())
+}
+
+async fn handle_run_events_ws(
+    mut socket: WebSocket,
+    mut rx: Option<tokio::sync::broadcast::Receiver<pagelens_app::RunEvent>>,
+    terminal_event: Option<pagelens_app::RunEvent>,
+) {
+    if let Some(event) = terminal_event {
+        if rx.is_none() {
+            if let Ok(data) = serde_json::to_string(&event) {
+                let _ = socket.send(Message::Text(data.into())).await;
+            }
+            let _ = socket.send(Message::Close(None)).await;
+            return;
+        }
+    }
+
+    loop {
+        tokio::select! {
+            incoming = socket.recv() => {
+                match incoming {
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Ping(payload))) => {
+                        let _ = socket.send(Message::Pong(payload)).await;
+                    }
+                    Some(Ok(_)) => {}
+                    Some(Err(_)) => break,
+                }
+            }
+            next_event = async {
+                if let Some(receiver) = &mut rx {
+                    receiver.recv().await.ok()
+                } else {
+                    None
+                }
+            }, if rx.is_some() => {
+                let Some(event) = next_event else {
+                    break;
+                };
+
+                match serde_json::to_string(&event) {
+                    Ok(data) => {
+                        if socket.send(Message::Text(data.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        error!(error = %err, "Failed to serialize run event for websocket");
+                        break;
+                    }
+                }
+
+                if matches!(event.kind.as_str(), "complete" | "failed" | "cancelled") {
+                    break;
+                }
+            }
+        }
+    }
+
+    let _ = socket.send(Message::Close(None)).await;
 }
 
 struct ApiError {

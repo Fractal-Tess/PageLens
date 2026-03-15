@@ -1,5 +1,23 @@
 export const BASE_URL = "http://127.0.0.1:8787";
 
+export const RUN_STARTED_EVENT = "pagelens:run-started";
+export const RUN_CANCEL_REQUESTED_EVENT = "pagelens:run-cancel-requested";
+
+export type RunStartedDetail = {
+  runId: string;
+  url: string;
+  analysisType: AnalysisRun["analysis_type"];
+};
+
+export type RunCancelRequestedDetail = {
+  runId: string;
+};
+
+function emitWindowEvent<T>(eventName: string, detail: T): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<T>(eventName, { detail }));
+}
+
 export interface AnalysisOptions {
   include_html?: boolean;
   include_accessibility_tree?: boolean;
@@ -478,7 +496,13 @@ export async function startAnalysis(
   if (!res.ok) {
     throw new Error(await apiErrorMessage(res, "Failed to start analysis"));
   }
-  return res.json();
+  const started = (await res.json()) as StartAnalysisResponse;
+  emitWindowEvent<RunStartedDetail>(RUN_STARTED_EVENT, {
+    runId: started.run_id,
+    url: req.url,
+    analysisType: req.analysis_type ?? "single",
+  });
+  return started;
 }
 
 export async function analyzeFavicon(
@@ -538,6 +562,9 @@ export async function cancelRun(runId: string): Promise<void> {
     method: "POST",
   });
   if (!res.ok) throw new Error(`Failed to cancel run: ${res.status}`);
+  emitWindowEvent<RunCancelRequestedDetail>(RUN_CANCEL_REQUESTED_EVENT, {
+    runId,
+  });
 }
 
 export async function updateRun(
@@ -561,6 +588,12 @@ export async function getHistory(
     `${BASE_URL}/api/history?limit=${limit}&offset=${offset}`,
   );
   if (!res.ok) throw new Error(`Failed to get history: ${res.status}`);
+  return res.json();
+}
+
+export async function getActiveRuns(): Promise<AnalysisRun[]> {
+  const res = await fetch(`${BASE_URL}/api/runs/active`);
+  if (!res.ok) throw new Error(`Failed to get active runs: ${res.status}`);
   return res.json();
 }
 
@@ -595,21 +628,42 @@ const SSE_EVENT_TYPES = [
   "cancelled",
 ] as const;
 
+export type RunEventStream = {
+  close: () => void;
+};
+
+function websocketBaseUrl(): string {
+  if (BASE_URL.startsWith("https://")) {
+    return `wss://${BASE_URL.slice("https://".length)}`;
+  }
+  if (BASE_URL.startsWith("http://")) {
+    return `ws://${BASE_URL.slice("http://".length)}`;
+  }
+  return BASE_URL;
+}
+
 export function subscribeToEvents(
   runId: string,
   onEvent: (event: RunEvent) => void,
   onError?: (err: Event) => void,
-): EventSource {
-  const es = new EventSource(`${BASE_URL}/api/runs/${runId}/events`);
+): RunEventStream {
+  const ws = new WebSocket(`${websocketBaseUrl()}/api/runs/${runId}/ws`);
 
-  for (const type of SSE_EVENT_TYPES) {
-    es.addEventListener(type, (e: MessageEvent) => {
-      try {
-        onEvent(JSON.parse(e.data) as RunEvent);
-      } catch {}
-    });
-  }
+  ws.onmessage = (e: MessageEvent) => {
+    try {
+      const event = JSON.parse(String(e.data)) as RunEvent;
+      if (
+        SSE_EVENT_TYPES.includes(event.kind as (typeof SSE_EVENT_TYPES)[number])
+      ) {
+        onEvent(event);
+      }
+    } catch {}
+  };
 
-  es.onerror = (e) => onError?.(e);
-  return es;
+  ws.onerror = (e) => onError?.(e);
+  ws.onclose = () => onError?.(new Event("close"));
+
+  return {
+    close: () => ws.close(),
+  };
 }

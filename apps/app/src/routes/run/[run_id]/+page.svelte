@@ -12,7 +12,7 @@
 		subscribeToEvents,
 		startAnalysis
 	} from '$lib/api';
-	import type { AnalysisRun, AnalysisPageResult, RunEvent, RunPayload } from '$lib/api';
+	import type { AnalysisRun, AnalysisPageResult, RunEvent, RunEventStream, RunPayload } from '$lib/api';
 
 	const runId = $derived(page.params.run_id ?? '');
 
@@ -22,7 +22,7 @@
 	let error = $state('');
 	let done = $state(false);
 	let cancelling = $state(false);
-	let es = $state<EventSource | null>(null);
+	let es = $state<RunEventStream | null>(null);
 	const initialLiveStats = {
 		discovered: 0,
 		queued: 0,

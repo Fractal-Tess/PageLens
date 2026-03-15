@@ -900,6 +900,24 @@ impl AppService {
         Ok(db.analysis_repository().list(limit, offset)?)
     }
 
+    pub async fn list_active_runs(&self) -> Result<Vec<AnalysisRun>> {
+        let active_run_ids: HashSet<String> = {
+            let runs = self.runs.lock().await;
+            runs.keys().cloned().collect()
+        };
+
+        let db = Database::open(&self.db_path)?;
+        let mut runs = db.analysis_repository().get_all_for_export()?;
+        runs.retain(|run| {
+            let stage = run.current_stage.as_deref().unwrap_or_default();
+            run_is_active(run)
+                && active_run_ids.contains(&run.id)
+                && stage != "cancelling"
+                && stage != "cancelled"
+        });
+        Ok(runs)
+    }
+
     pub fn list_run_assets(&self, run_id: &str) -> Result<Vec<AnalysisAsset>> {
         let db = Database::open(&self.db_path)?;
         Ok(db.analysis_repository().list_assets(run_id)?)
