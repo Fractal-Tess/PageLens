@@ -1,13 +1,15 @@
 # PageLens
 
-PageLens is a website analysis toolkit built with Rust, Tauri, and Svelte. It provides a desktop app and CLI for SEO checks, crawl analysis, snapshots, performance signals, and site-file inspection.
+PageLens is a website analysis toolkit built with Rust and Svelte. It provides a web app, API, and CLI for SEO checks, crawl analysis, snapshots, performance signals, site-file inspection, favicon audits, and HTTP benchmarking.
 
 ## Monorepo Packages
 
-- `apps/tauri`: Desktop application (Tauri backend + Svelte frontend)
-- `crates/pagelens-core`: Core Rust analysis engine
-- `crates/pagelens-cli`: Command-line interface
-- `test-apps/nextjs` and `test-apps/svelte-kit`: Integration test targets
+- `apps/app`: SvelteKit web application
+- `crates/pagelens-app`: shared application services and run orchestration
+- `crates/pagelens-api`: HTTP API over the app service
+- `crates/pagelens-core`: core Rust analysis engine
+- `crates/pagelens-cli`: command-line interface
+- `test-apps/nextjs` and `test-apps/svelte-kit`: integration test targets
 
 ## Requirements
 
@@ -16,8 +18,6 @@ PageLens is a website analysis toolkit built with Rust, Tauri, and Svelte. It pr
 - Rust stable toolchain
 
 Optional: use the pinned development environment from `flake.nix` with `nix develop`.
-
-Optional (Linux): install `mold` linker, or remove related rust flags in `apps/tauri/src-tauri/.cargo/config.toml`.
 
 ## Getting Started
 
@@ -33,16 +33,16 @@ Or enter the Nix development shell first:
 nix develop
 ```
 
+Start the web app in development:
+
+```bash
+bun run dev
+```
+
 Build test applications:
 
 ```bash
 bun turbo run build --filter="./test-apps/*"
-```
-
-Start desktop app in development:
-
-```bash
-bun run dev
 ```
 
 ## Common Commands
@@ -50,6 +50,9 @@ bun run dev
 ```bash
 # Build workspace packages
 bun turbo run build
+
+# Typecheck the web app
+bun run check
 
 # Start test applications used by Rust integration tests
 bun run start-apps
@@ -69,7 +72,7 @@ CLI releases are built from Git tags by `.github/workflows/release-cli.yml`.
 
 The helper scripts in `scripts/` require Python 3.11+ because they read TOML with `tomllib`.
 
-On Linux CI, the CLI release validation and Linux release build run inside the pinned Nix dev shell from `flake.nix` so GitHub Actions uses the same Rust/Bun/system-library environment as local development.
+On Linux CI, the CLI release validation and Linux release build run inside the pinned Nix dev shell from `flake.nix` so GitHub Actions uses the same Rust/Bun environment as local development.
 
 Release a new CLI version with:
 
@@ -105,16 +108,19 @@ If those services are not running, server-dependent tests fail in CI mode by des
 ## Architecture Notes
 
 - `pagelens-core` exposes browser automation, crawling, snapshot capture, SEO analysis, HTTP benchmarking, and site-file analysis.
+- `pagelens-app` provides shared application services for the API layer.
 - `pagelens-cli` builds on `pagelens-core` and adds terminal and JSON output modes.
-- Tauri IPC types are generated to `apps/tauri/src/lib/ipc.ts` and should not be edited manually.
+- `apps/app` is the SvelteKit frontend workspace.
 
 ## Project Layout
 
 ```text
 pagelens/
 ├── apps/
-│   └── tauri/
+│   └── app/
 ├── crates/
+│   ├── pagelens-app/
+│   ├── pagelens-api/
 │   ├── pagelens-core/
 │   └── pagelens-cli/
 ├── test-apps/

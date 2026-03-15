@@ -4,7 +4,7 @@
 	import { onMount } from 'svelte';
 	import {
 		getRun, getRunPages, getRunAssets, parseRunPayload,
-		startAnalysis, assetUrl, isCrawlRunPayload, isHttpBenchmarkRunPayload
+		startAnalysis, assetUrl, isCrawlRunPayload, isHttpBenchmarkRunPayload, isFaviconRunPayload
 	} from '$lib/api';
 	import type { AnalysisAsset, AnalysisPageResult, RunPayload, SeoIssue } from '$lib/api';
 
@@ -51,6 +51,7 @@
 		if (!payload) return null;
 		if (isHttpBenchmarkRunPayload(payload)) return null;
 		if (!isCrawlRunPayload(payload)) {
+			if (isFaviconRunPayload(payload)) return null;
 			return {
 				snapshot: payload.snapshot,
 				seo_report: payload.seo_report

@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "github",
-    "url": "https://github.com/Fractal-Tess/Svelte-Tauri"
+    "url": "https://github.com/Fractal-Tess/pagelens"
   },
   "author": {
     "name": "Fractal-Tess",
@@ -20,13 +20,13 @@
   ],
   "scripts": {
     "build": "turbo run build",
-    "build:tauri": "bun run --cwd apps/tauri build",
+    "build:app": "bun run --cwd apps/app build",
     "build:test-apps": "turbo run build --filter='./test-apps/*'",
-    "dev": "bun run --cwd apps/tauri dev",
+    "dev": "bun run --cwd apps/app dev",
     "format": "prettier --write .",
-    "check": "bun run --cwd apps/tauri check",
-    "svelte:build": "bun run --cwd apps/tauri svelte:build",
-    "svelte:dev": "bun run --cwd apps/tauri svelte:dev",
+    "check": "bun run --cwd apps/app check",
+    "svelte:build": "bun run --cwd apps/app build",
+    "svelte:dev": "bun run --cwd apps/app dev",
     "start-apps": "turbo run start --filter='./test-apps/*' --ui=tui",
     "start-test-apps": "bun run start-apps",
     "release:cli:check-tag": "./scripts/check-cli-release-tag.sh",
