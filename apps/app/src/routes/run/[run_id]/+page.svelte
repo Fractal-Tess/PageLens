@@ -609,20 +609,8 @@
 					Run canceled by user before completion. Showing finalized partial results.
 				</div>
 			{/if}
-			<div class="grid grid-cols-2 gap-px bg-border md:grid-cols-4">
-				<div class="bg-background p-4">
-					<div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">URL</div>
-					<div class="truncate font-mono text-xs">{run.url}</div>
-				</div>
-				<div class="bg-background p-4">
-					<div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">Method</div>
-					<div class="font-mono text-xs">{runMethod ?? '—'}</div>
-				</div>
-				<div class="bg-background p-4">
-					<div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">Status</div>
-					<div class="font-mono text-xs uppercase">{statusLabel(run)}</div>
-				</div>
-				{#if run.analysis_type === 'crawl'}
+			{#if run.analysis_type === 'crawl'}
+				<div class="grid grid-cols-2 gap-px bg-border md:grid-cols-4">
 					<div class="bg-background p-4">
 						<div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">Discovered</div>
 						<div class="font-mono text-xs">{liveStats.discovered}</div>
@@ -639,8 +627,8 @@
 						<div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">Links Found</div>
 						<div class="font-mono text-xs">{liveStats.linksFoundTotal}</div>
 					</div>
-				{/if}
-			</div>
+				</div>
+			{/if}
 
 			{#if run.status === 'running' || run.status === 'pending'}
 				<div class="mt-4 h-px w-full bg-border">
@@ -729,6 +717,10 @@
 					<div class="bg-background p-5">
 						<div class="mb-2 text-[10px] tracking-widest text-muted-foreground uppercase">Req/sec</div>
 						<div class="text-2xl font-black tabular-nums text-primary">{benchmarkLive.requestsPerSec.toFixed(2)}</div>
+					</div>
+					<div class="bg-background p-5">
+						<div class="mb-2 text-[10px] tracking-widest text-muted-foreground uppercase">Failed</div>
+						<div class="text-2xl font-black tabular-nums {benchmarkLive.failed > 0 ? 'text-destructive' : 'text-muted-foreground'}">{benchmarkLive.failed}</div>
 					</div>
 					<div class="bg-background p-5">
 						<div class="mb-2 text-[10px] tracking-widest text-muted-foreground uppercase">Fastest</div>
@@ -843,6 +835,12 @@
 						<div class="mb-2 text-[10px] tracking-widest text-muted-foreground uppercase">Req/sec</div>
 						<div class="text-2xl font-black tabular-nums text-primary">
 							{benchmarkPayload.requests_per_sec.toFixed(2)}
+						</div>
+					</div>
+					<div class="bg-background p-5">
+						<div class="mb-2 text-[10px] tracking-widest text-muted-foreground uppercase">Failed</div>
+						<div class="text-2xl font-black tabular-nums {benchmarkPayload.failed_requests > 0 ? 'text-destructive' : 'text-muted-foreground'}">
+							{benchmarkPayload.failed_requests}
 						</div>
 					</div>
 					<div class="bg-background p-5">
