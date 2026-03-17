@@ -79,110 +79,116 @@
 	/>
 </div>
 
-<div class="relative mx-auto max-w-[1400px] px-6 py-6">
-	<!-- Slim Header -->
-	<header class="flex items-end justify-between mb-6 pb-4 border-b border-border/30">
-		<div class="flex items-baseline gap-4">
-			<h1 class="text-3xl md:text-4xl font-black tracking-tighter leading-none">
-				PAGE<span class="text-primary">LENS</span>
-			</h1>
-			<span
-				class="hidden sm:inline text-[10px] tracking-[0.4em] text-muted-foreground/50 uppercase"
-			>
-				web analysis tool
-			</span>
-		</div>
-		<a
-			href="/history"
-			class="text-[10px] tracking-widest text-muted-foreground/40 uppercase transition-colors hover:text-primary flex items-center gap-1.5"
-		>
-			HISTORY <span class="text-sm">→</span>
-		</a>
-	</header>
-
-	<!-- Bento Grid -->
-	<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-		{#each modes as mode, i}
-			<a
-				href={mode.href}
-				class="card-glow group relative overflow-hidden bg-background/60 border border-border/50 backdrop-blur-sm transition-all duration-200 hover:-translate-y-0.5 {i === 0
-					? 'xl:col-span-2 xl:row-span-2'
-					: ''}"
-				style="--accent: {mode.accent};"
-			>
-				<!-- Accent wash -->
-				<div
-					class="absolute inset-0 opacity-[0.03] group-hover:opacity-[0.07] transition-opacity duration-300 pointer-events-none"
-					style="background: linear-gradient(135deg, var(--accent), transparent 60%);"
-				></div>
-
-				<!-- Left rail -->
-				<div
-					class="absolute left-0 top-0 bottom-0 w-[3px] transition-all duration-200 group-hover:w-[5px]"
-					style="background: var(--accent); box-shadow: 0 0 8px var(--accent);"
-				></div>
-
-				<div
-					class="relative p-4 pl-5 h-full flex flex-col {i === 0 ? 'xl:p-6 xl:pl-7' : ''}"
+<div class="relative min-h-screen flex flex-col items-center justify-center px-6 py-8">
+	<div class="w-full max-w-[1100px]">
+		<!-- Slim Header -->
+		<header class="flex items-end justify-between mb-6 pb-4 border-b border-border/30">
+			<div class="flex items-baseline gap-4">
+				<h1 class="text-3xl md:text-4xl font-black tracking-tighter leading-none">
+					PAGE<span class="text-primary">LENS</span>
+				</h1>
+				<span
+					class="hidden sm:inline text-[10px] tracking-[0.4em] text-muted-foreground/50 uppercase"
 				>
-					<!-- ID + arrow -->
-					<div class="flex items-center justify-between mb-2">
-						<span
-							class="inline-flex items-center justify-center w-6 h-6 text-[9px] font-bold border tracking-wider"
-							style="border-color: var(--accent); color: var(--accent);"
-						>
-							{mode.id}
-						</span>
-						<span
-							class="text-sm text-muted-foreground/20 transition-all duration-200 group-hover:text-[var(--accent)] group-hover:translate-x-0.5"
-						>
-							→
-						</span>
-					</div>
-
-					<!-- Title -->
-					<h2
-						class="{i === 0
-							? 'text-base xl:text-2xl xl:mb-3'
-							: 'text-base'} font-black tracking-tight mb-1.5 transition-colors duration-200 group-hover:text-[var(--accent)]"
-					>
-						{mode.title}<span class="font-light opacity-50"> {mode.subtitle}</span>
-					</h2>
-
-					<!-- Desc -->
-					<p
-						class="{i === 0
-							? 'xl:text-xs'
-							: 'line-clamp-2'} text-[11px] leading-relaxed text-muted-foreground/50 mb-3"
-					>
-						{mode.desc}
-					</p>
-
-					<div class="flex-1"></div>
-
-					<!-- Tags -->
-					<div class="flex flex-wrap gap-1 mb-2">
-						{#each mode.tags.slice(0, i === 0 ? 6 : 3) as tag}
-							<span
-								class="border border-border/40 px-1.5 py-0.5 text-[7px] tracking-widest text-muted-foreground/35 uppercase transition-colors duration-200 group-hover:border-border group-hover:text-muted-foreground/60"
-							>
-								{tag}
-							</span>
-						{/each}
-						{#if mode.tags.length > (i === 0 ? 6 : 3)}
-							<span class="text-[7px] text-muted-foreground/25 self-center">
-								+{mode.tags.length - (i === 0 ? 6 : 3)}
-							</span>
-						{/if}
-					</div>
-
-					<!-- Meta -->
-					<div class="text-[8px] tracking-wider text-muted-foreground/30 uppercase">
-						{mode.meta}
-					</div>
-				</div>
+					web analysis tool
+				</span>
+			</div>
+			<a
+				href="/history"
+				class="text-[10px] tracking-widest text-muted-foreground/40 uppercase transition-colors hover:text-primary flex items-center gap-1.5"
+			>
+				HISTORY <span class="text-sm">→</span>
 			</a>
-		{/each}
+		</header>
+
+		<!-- Bento Grid -->
+		<div class="bento-grid grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+			{#each modes as mode, i}
+				{@const hero = i === 0}
+				{@const wide = i === 4}
+				<a
+					href={mode.href}
+					class="card-glow group relative overflow-hidden bg-background/60 border border-border/50 backdrop-blur-sm transition-all duration-200 hover:-translate-y-0.5
+						{hero ? 'md:col-span-2 md:row-span-2' : ''}
+						{wide ? 'xl:col-span-2' : ''}"
+					style="--accent: {mode.accent};"
+				>
+					<!-- Accent wash -->
+					<div
+						class="absolute inset-0 opacity-[0.03] group-hover:opacity-[0.07] transition-opacity duration-300 pointer-events-none"
+						style="background: linear-gradient(135deg, var(--accent), transparent 60%);"
+					></div>
+
+					<!-- Left rail -->
+					<div
+						class="absolute left-0 top-0 bottom-0 w-[3px] transition-all duration-200 group-hover:w-[5px]"
+						style="background: var(--accent); box-shadow: 0 0 8px var(--accent);"
+					></div>
+
+					<div
+						class="relative h-full flex flex-col {hero
+							? 'p-6 xl:p-8 pl-6 xl:pl-9'
+							: 'p-5 pl-6'}"
+					>
+						<!-- ID + arrow -->
+						<div class="flex items-center justify-between mb-3">
+							<span
+								class="inline-flex items-center justify-center w-7 h-7 text-[10px] font-bold border tracking-wider"
+								style="border-color: var(--accent); color: var(--accent);"
+							>
+								{mode.id}
+							</span>
+							<span
+								class="text-sm text-muted-foreground/20 transition-all duration-200 group-hover:text-[var(--accent)] group-hover:translate-x-0.5"
+							>
+								→
+							</span>
+						</div>
+
+						<!-- Title -->
+						<h2
+							class="{hero
+								? 'text-lg xl:text-3xl xl:mb-3'
+								: 'text-lg'} font-black tracking-tight mb-2 transition-colors duration-200 group-hover:text-[var(--accent)]"
+						>
+							{mode.title}<span class="font-light opacity-50"> {mode.subtitle}</span>
+						</h2>
+
+						<!-- Desc -->
+						<p
+							class="{hero
+								? 'xl:text-sm'
+								: 'text-xs line-clamp-2'} text-xs leading-relaxed text-muted-foreground/50 mb-4"
+						>
+							{mode.desc}
+						</p>
+
+						<div class="flex-1"></div>
+
+						<!-- Tags -->
+						<div class="flex flex-wrap gap-1.5 mb-3">
+							{#each mode.tags.slice(0, hero ? 6 : 3) as tag}
+								<span
+									class="border border-border/40 px-2 py-0.5 text-[8px] tracking-widest text-muted-foreground/35 uppercase transition-colors duration-200 group-hover:border-border group-hover:text-muted-foreground/60"
+								>
+									{tag}
+								</span>
+							{/each}
+							{#if mode.tags.length > (hero ? 6 : 3)}
+								<span class="text-[8px] text-muted-foreground/25 self-center">
+									+{mode.tags.length - (hero ? 6 : 3)}
+								</span>
+							{/if}
+						</div>
+
+						<!-- Meta -->
+						<div class="text-[9px] tracking-wider text-muted-foreground/30 uppercase">
+							{mode.meta}
+						</div>
+					</div>
+				</a>
+			{/each}
+		</div>
 	</div>
 </div>
 
@@ -198,5 +204,9 @@
 		box-shadow:
 			0 0 25px -5px var(--accent),
 			0 4px 12px rgba(0, 0, 0, 0.3);
+	}
+
+	.bento-grid {
+		grid-auto-rows: minmax(170px, auto);
 	}
 </style>
