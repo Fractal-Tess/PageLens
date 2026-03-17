@@ -60,7 +60,7 @@
 </svelte:head>
 
 <!-- Background -->
-<div class="fixed inset-0 -z-10">
+<div class="fixed inset-0 z-0 pointer-events-none">
 	<PixelSnow
 		color="#B19EEF"
 		flakeSize={0.01}
@@ -77,7 +77,7 @@
 	/>
 </div>
 
-<div class="relative min-h-screen flex flex-col items-center justify-center px-6 py-8">
+<div class="relative z-10 h-[calc(100svh-5.5rem)] flex flex-col items-center justify-center px-6 py-8">
 	<div class="w-full max-w-[1100px]">
 		<!-- Slim Header -->
 		<header class="flex items-end justify-between mb-6 pb-4 border-b border-border/30">
@@ -149,7 +149,7 @@
 								? 'text-lg xl:text-3xl xl:mb-3'
 								: 'text-lg'} font-black tracking-tight mb-2 transition-colors duration-200 group-hover:text-[var(--accent)]"
 						>
-							{mode.title}<span class="font-light opacity-50"> {mode.subtitle}</span>
+							{mode.title}<span class="font-light opacity-50 ml-2">{mode.subtitle}</span>
 						</h2>
 
 						<!-- Desc -->
