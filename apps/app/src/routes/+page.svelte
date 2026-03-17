@@ -62,16 +62,16 @@
 <!-- Background -->
 <div class="fixed inset-0 z-0 pointer-events-none">
 	<PixelSnow
-		color="#B19EEF"
-		flakeSize={0.01}
+		color="#E85D3A"
+		flakeSize={0.003}
 		minFlakeSize={1.25}
-		pixelResolution={200}
-		speed={1.25}
-		density={0.3}
-		direction={125}
-		brightness={1}
-		depthFade={8}
-		farPlane={20}
+		pixelResolution={500}
+		speed={0.3}
+		density={0.1}
+		direction={90}
+		brightness={0.8}
+		depthFade={6.5}
+		farPlane={28}
 		gamma={0.4545}
 		variant="square"
 	/>
