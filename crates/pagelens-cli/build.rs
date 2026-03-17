@@ -5,11 +5,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
-    let debug_assertions = env::var("CARGO_CFG_DEBUG_ASSERTIONS").unwrap_or_default();
-    if debug_assertions == "true" {
-        return;
-    }
-
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap_or_default());
     let repo_root = manifest_dir
         .parent()

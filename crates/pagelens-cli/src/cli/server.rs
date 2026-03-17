@@ -1,23 +1,18 @@
 //! Server mode functionality
 
 use std::net::{IpAddr, Ipv4Addr};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Command;
-#[cfg(not(debug_assertions))]
-use std::net::SocketAddr;
 
 use pagelens_logging::{info, warn};
 
-#[cfg(not(debug_assertions))]
 use axum::http::header;
-#[cfg(not(debug_assertions))]
+use axum::http::HeaderMap;
 use axum::http::{Method, StatusCode, Uri};
-#[cfg(not(debug_assertions))]
 use axum::response::{IntoResponse, Response};
-#[cfg(not(debug_assertions))]
 use include_dir::{include_dir, Dir};
 
-#[cfg(not(debug_assertions))]
 static EMBEDDED_WEB_DIST: Dir<'_> = include_dir!("$OUT_DIR/pagelens-web");
 
 pub fn default_server_db_path() -> PathBuf {
@@ -87,40 +82,32 @@ fn open_url(url: &str) -> Result<(), String> {
 
 pub async fn run_server(host: IpAddr, port: u16, db_path: PathBuf) -> Result<(), String> {
     info!(host = %host, port, db_path = %db_path.display(), "Running server mode");
-    #[cfg(debug_assertions)]
-    {
-        let config = pagelens_api::ApiConfig {
-            host,
-            port,
-            db_path,
-        };
-        return pagelens_api::serve(config).await;
-    }
+    let service = pagelens_api::service_from_db_path(db_path)?;
+    let api_router = pagelens_api::router(service);
+    let app = api_router.fallback(serve_embedded_web);
 
-    #[cfg(not(debug_assertions))]
-    {
-        let service = pagelens_api::service_from_db_path(db_path)?;
-        let api_router = pagelens_api::router(service);
-        let app = api_router.fallback(serve_embedded_web);
-
-        let addr = SocketAddr::new(host, port);
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .map_err(|e| e.to_string())?;
-        return axum::serve(listener, app).await.map_err(|e| e.to_string());
-    }
+    let addr = SocketAddr::new(host, port);
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .map_err(|e| e.to_string())?;
+    axum::serve(listener, app).await.map_err(|e| e.to_string())
 }
 
-#[cfg(not(debug_assertions))]
-async fn serve_embedded_web(method: Method, uri: Uri) -> Response {
+async fn serve_embedded_web(method: Method, uri: Uri, headers: HeaderMap) -> Response {
     if method != Method::GET && method != Method::HEAD {
         return (StatusCode::METHOD_NOT_ALLOWED, "Method not allowed").into_response();
     }
-    serve_embedded_asset(uri.path())
+    let accepts_html = headers
+        .get(header::ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .is_none_or(|value| {
+            value.contains("text/html") || value.contains("application/xhtml+xml") || value.contains("*/*")
+        });
+
+    serve_embedded_asset(uri.path(), accepts_html)
 }
 
-#[cfg(not(debug_assertions))]
-fn serve_embedded_asset(path: &str) -> Response {
+fn serve_embedded_asset(path: &str, allow_spa_fallback: bool) -> Response {
     let requested = {
         let value = path.trim_start_matches('/');
         if value.is_empty() {
@@ -138,7 +125,9 @@ fn serve_embedded_asset(path: &str) -> Response {
         .rsplit('/')
         .next()
         .is_some_and(|segment| segment.contains('.'));
-    if !looks_like_asset {
+    let is_api_path = requested.starts_with("api/");
+
+    if !looks_like_asset && !is_api_path && allow_spa_fallback {
         if let Some(file) = EMBEDDED_WEB_DIST.get_file("index.html") {
             return response_from_embed_file(file.contents(), "index.html");
         }
@@ -147,7 +136,6 @@ fn serve_embedded_asset(path: &str) -> Response {
     (StatusCode::NOT_FOUND, "Not found").into_response()
 }
 
-#[cfg(not(debug_assertions))]
 fn response_from_embed_file(contents: &'static [u8], path: &str) -> Response {
     let content_type = match path.rsplit('.').next().unwrap_or_default() {
         "html" => "text/html; charset=utf-8",
