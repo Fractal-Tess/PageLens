@@ -115,6 +115,12 @@
 				>
 					PWA
 				</a>
+				<a
+					href="/zellij"
+					class="text-[10px] tracking-widest uppercase text-muted-foreground hover:text-foreground transition-colors"
+				>
+					ZELLIJ
+				</a>
 				<span class="text-border">|</span>
 				<a
 					href="/history"
