@@ -1,5 +1,5 @@
 <script lang="ts">
-	import PixelBlast from '$lib/components/PixelBlast.svelte';
+	import PixelSnow from '$lib/components/PixelSnow.svelte';
 
 	const modes = [
 		{
@@ -61,21 +61,19 @@
 
 <!-- Background -->
 <div class="fixed inset-0 -z-10">
-	<PixelBlast
-		variant="square"
-		pixelSize={4}
+	<PixelSnow
 		color="#B19EEF"
-		patternScale={2}
-		patternDensity={1}
-		pixelSizeJitter={0}
-		enableRipples={true}
-		rippleSpeed={0.4}
-		rippleThickness={0.12}
-		rippleIntensityScale={1.5}
-		liquid={false}
-		speed={0.5}
-		edgeFade={0.25}
-		transparent={true}
+		flakeSize={0.01}
+		minFlakeSize={1.25}
+		pixelResolution={200}
+		speed={1.25}
+		density={0.3}
+		direction={125}
+		brightness={1}
+		depthFade={8}
+		farPlane={20}
+		gamma={0.4545}
+		variant="square"
 	/>
 </div>
 
