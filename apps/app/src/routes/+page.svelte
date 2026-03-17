@@ -1,6 +1,4 @@
 <script lang="ts">
-	import PixelSnow from '$lib/components/PixelSnow.svelte';
-
 	const modes = [
 		{
 			id: '01',
@@ -58,24 +56,6 @@
 <svelte:head>
 	<title>PAGELENS — Web Analysis</title>
 </svelte:head>
-
-<!-- Background -->
-<div class="fixed inset-0 z-0 pointer-events-none">
-	<PixelSnow
-		color="#E85D3A"
-		flakeSize={0.003}
-		minFlakeSize={1.25}
-		pixelResolution={500}
-		speed={0.3}
-		density={0.1}
-		direction={90}
-		brightness={0.8}
-		depthFade={6.5}
-		farPlane={28}
-		gamma={0.4545}
-		variant="square"
-	/>
-</div>
 
 <div class="relative z-10 h-[calc(100svh-5.5rem)] flex flex-col items-center justify-center px-6 py-8">
 	<div class="w-full max-w-[1100px]">
