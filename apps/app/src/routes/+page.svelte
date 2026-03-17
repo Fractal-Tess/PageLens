@@ -10,7 +10,7 @@
 			desc: 'Deep inspection of any URL. Performance vitals, SEO metadata, DOM structure, assets, redirect chains, and detected issues — in real time.',
 			tags: ['Performance', 'SEO', 'DOM structure', 'Assets', 'Network', 'Issues'],
 			meta: 'Single URL · Headless browser',
-			accentColor: '#B19EEF'
+			accent: '#00D4FF'
 		},
 		{
 			id: '02',
@@ -18,9 +18,9 @@
 			title: 'FULL SITE',
 			subtitle: 'CRAWL',
 			desc: 'Follow all internal links and map an entire site. Aggregate SEO metrics, site-wide issue detection, and complete page inventory.',
-			tags: ['Multi-page spider', 'Link graph', 'Aggregate SEO', 'Site inventory', 'Cross-page issues', 'Coverage stats'],
+			tags: ['Multi-page', 'Link graph', 'Aggregate SEO', 'Site inventory', 'Cross-page issues'],
 			meta: 'Multiple pages · Spider',
-			accentColor: '#7C5CFF'
+			accent: '#B19EEF'
 		},
 		{
 			id: '03',
@@ -28,29 +28,29 @@
 			title: 'HTTP',
 			subtitle: 'BENCHMARK',
 			desc: 'Stress test any HTTP endpoint with concurrent requests. Measure RPS, p50/p95/p99 latency, throughput, and failure rates under load.',
-			tags: ['Load testing', 'Requests/sec', 'Latency p95/p99', 'Concurrency', 'Status codes', 'Error rates'],
+			tags: ['Load testing', 'Requests/sec', 'Latency p95/p99', 'Concurrency', 'Error rates'],
 			meta: 'Single endpoint · Load test',
-			accentColor: '#9D7FFF'
+			accent: '#A3FF12'
 		},
 		{
 			id: '04',
 			href: '/analyse/favicon',
 			title: 'FAVICON',
 			subtitle: 'ANALYZER',
-			desc: 'Inspect favicon coverage for any page. Resolve HTML icon declarations, compare fallback paths, and preview candidate icon files in one pass.',
-			tags: ['Icon discovery', 'Rel/sizes metadata', 'Default fallback', 'Candidate preview', 'Brand consistency', 'Asset quality'],
+			desc: 'Inspect favicon coverage for any page. Resolve HTML icon declarations, compare fallback paths, and preview candidate icon files.',
+			tags: ['Icon discovery', 'Rel/sizes', 'Default fallback', 'Candidate preview', 'Brand audit'],
 			meta: 'Single URL · Brand icon audit',
-			accentColor: '#C4A9FF'
+			accent: '#FFB800'
 		},
 		{
 			id: '05',
 			href: '/analyse/pwa',
 			title: 'PWA',
 			subtitle: 'ANALYZER',
-			desc: 'Validate progressive web app readiness: manifest quality, service worker registration hints, theme metadata, and touch icon support.',
-			tags: ['Manifest', 'Service worker', 'Installability', 'Theme color', 'Touch icons', 'PWA score'],
+			desc: 'Validate progressive web app readiness: manifest quality, service worker registration, theme metadata, and touch icon support.',
+			tags: ['Manifest', 'Service worker', 'Installability', 'Theme color', 'Touch icons'],
 			meta: 'Single URL · PWA readiness',
-			accentColor: '#A088F0'
+			accent: '#FF6B6B'
 		}
 	] as const;
 </script>
@@ -79,98 +79,124 @@
 	/>
 </div>
 
-<div class="relative mx-auto max-w-7xl px-6 py-12">
-
-	<!-- Compact Header -->
-	<div class="mb-12 bg-background/60 backdrop-blur-sm">
-		<div class="mb-2 text-[10px] tracking-[0.5em] text-muted-foreground uppercase">
-			web analysis tool
+<div class="relative mx-auto max-w-[1400px] px-6 py-6">
+	<!-- Slim Header -->
+	<header class="flex items-end justify-between mb-6 pb-4 border-b border-border/30">
+		<div class="flex items-baseline gap-4">
+			<h1 class="text-3xl md:text-4xl font-black tracking-tighter leading-none">
+				PAGE<span class="text-primary">LENS</span>
+			</h1>
+			<span
+				class="hidden sm:inline text-[10px] tracking-[0.4em] text-muted-foreground/50 uppercase"
+			>
+				web analysis tool
+			</span>
 		</div>
-		<h1 class="text-5xl md:text-7xl font-black leading-none tracking-tighter mb-3">
-			PAGE<span class="text-primary">LENS</span>
-		</h1>
-		<p class="text-xs leading-relaxed text-muted-foreground max-w-lg">
-			Select an analysis mode. Single-page inspection, full-site crawl, or HTTP load testing.
-		</p>
-	</div>
-
-	<!-- Mode Cards Grid -->
-	<div class="mb-8">
-		<div class="mb-4 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">
-			Select analysis mode —
-		</div>
-
-		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-			{#each modes as mode, index}
-				<a
-					href={mode.href}
-					class="group relative bg-background/70 border border-border backdrop-blur-sm transition-all duration-200 hover:bg-background/90 hover:border-primary/50 hover:shadow-lg hover:-translate-y-1"
-					style="--accent-color: {mode.accentColor}; animation-delay: {index * 40}ms"
-				>
-					<!-- Thick bottom border accent -->
-					<div
-						class="absolute bottom-0 left-0 right-0 h-1 transition-all duration-200 group-hover:h-1.5"
-						style="background-color: var(--accent-color);"
-					></div>
-
-					<div class="p-5 pb-6">
-						<!-- ID + Meta -->
-						<div class="flex items-start justify-between mb-3">
-							<span class="text-[10px] tracking-[0.3em] text-muted-foreground/50 uppercase">
-								{mode.id}
-							</span>
-							<span
-								class="text-xs text-muted-foreground/40 transition-all duration-200 group-hover:text-primary translate-x-0 group-hover:translate-x-0.5"
-							>→</span>
-						</div>
-
-						<!-- Title -->
-						<h2 class="text-lg md:text-xl font-black tracking-tight mb-2 group-hover:text-primary transition-colors duration-200">
-							{mode.title}
-							<span style="color: var(--accent-color);">{mode.subtitle}</span>
-						</h2>
-
-						<!-- Description -->
-						<p class="text-xs leading-relaxed text-muted-foreground mb-4 line-clamp-3">
-							{mode.desc}
-						</p>
-
-						<!-- Tags (first 3) -->
-						<div class="flex flex-wrap gap-1 mb-4">
-							{#each mode.tags.slice(0, 3) as tag}
-								<span
-									class="border border-border/50 px-1.5 py-0.5 text-[8px] tracking-widest text-muted-foreground/40 uppercase transition-colors duration-200 group-hover:border-primary/30 group-hover:text-muted-foreground/60"
-								>{tag}</span>
-							{/each}
-							{#if mode.tags.length > 3}
-								<span class="text-[8px] text-muted-foreground/30 self-center">
-									+{mode.tags.length - 3}
-								</span>
-							{/if}
-						</div>
-
-						<!-- Card Meta -->
-						<div class="text-[9px] leading-relaxed tracking-wider text-muted-foreground/40 uppercase">
-							{mode.meta}
-						</div>
-					</div>
-				</a>
-			{/each}
-		</div>
-	</div>
-
-	<!-- History footer bar -->
-	<div
-		class="flex items-center justify-between border border-border bg-background/70 px-5 py-3 backdrop-blur-sm"
-	>
-		<span class="text-[10px] tracking-wider text-muted-foreground/60 uppercase">
-			Previous analysis runs
-		</span>
 		<a
 			href="/history"
-			class="text-[10px] tracking-widest text-primary uppercase transition-colors hover:text-primary/80"
+			class="text-[10px] tracking-widest text-muted-foreground/40 uppercase transition-colors hover:text-primary flex items-center gap-1.5"
 		>
-			VIEW HISTORY →
+			HISTORY <span class="text-sm">→</span>
 		</a>
+	</header>
+
+	<!-- Bento Grid -->
+	<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+		{#each modes as mode, i}
+			<a
+				href={mode.href}
+				class="card-glow group relative overflow-hidden bg-background/60 border border-border/50 backdrop-blur-sm transition-all duration-200 hover:-translate-y-0.5 {i === 0
+					? 'xl:col-span-2 xl:row-span-2'
+					: ''}"
+				style="--accent: {mode.accent};"
+			>
+				<!-- Accent wash -->
+				<div
+					class="absolute inset-0 opacity-[0.03] group-hover:opacity-[0.07] transition-opacity duration-300 pointer-events-none"
+					style="background: linear-gradient(135deg, var(--accent), transparent 60%);"
+				></div>
+
+				<!-- Left rail -->
+				<div
+					class="absolute left-0 top-0 bottom-0 w-[3px] transition-all duration-200 group-hover:w-[5px]"
+					style="background: var(--accent); box-shadow: 0 0 8px var(--accent);"
+				></div>
+
+				<div
+					class="relative p-4 pl-5 h-full flex flex-col {i === 0 ? 'xl:p-6 xl:pl-7' : ''}"
+				>
+					<!-- ID + arrow -->
+					<div class="flex items-center justify-between mb-2">
+						<span
+							class="inline-flex items-center justify-center w-6 h-6 text-[9px] font-bold border tracking-wider"
+							style="border-color: var(--accent); color: var(--accent);"
+						>
+							{mode.id}
+						</span>
+						<span
+							class="text-sm text-muted-foreground/20 transition-all duration-200 group-hover:text-[var(--accent)] group-hover:translate-x-0.5"
+						>
+							→
+						</span>
+					</div>
+
+					<!-- Title -->
+					<h2
+						class="{i === 0
+							? 'text-base xl:text-2xl xl:mb-3'
+							: 'text-base'} font-black tracking-tight mb-1.5 transition-colors duration-200 group-hover:text-[var(--accent)]"
+					>
+						{mode.title}<span class="font-light opacity-50"> {mode.subtitle}</span>
+					</h2>
+
+					<!-- Desc -->
+					<p
+						class="{i === 0
+							? 'xl:text-xs'
+							: 'line-clamp-2'} text-[11px] leading-relaxed text-muted-foreground/50 mb-3"
+					>
+						{mode.desc}
+					</p>
+
+					<div class="flex-1"></div>
+
+					<!-- Tags -->
+					<div class="flex flex-wrap gap-1 mb-2">
+						{#each mode.tags.slice(0, i === 0 ? 6 : 3) as tag}
+							<span
+								class="border border-border/40 px-1.5 py-0.5 text-[7px] tracking-widest text-muted-foreground/35 uppercase transition-colors duration-200 group-hover:border-border group-hover:text-muted-foreground/60"
+							>
+								{tag}
+							</span>
+						{/each}
+						{#if mode.tags.length > (i === 0 ? 6 : 3)}
+							<span class="text-[7px] text-muted-foreground/25 self-center">
+								+{mode.tags.length - (i === 0 ? 6 : 3)}
+							</span>
+						{/if}
+					</div>
+
+					<!-- Meta -->
+					<div class="text-[8px] tracking-wider text-muted-foreground/30 uppercase">
+						{mode.meta}
+					</div>
+				</div>
+			</a>
+		{/each}
 	</div>
 </div>
+
+<style>
+	.card-glow {
+		transition:
+			border-color 0.2s,
+			box-shadow 0.2s,
+			transform 0.2s;
+	}
+	.card-glow:hover {
+		border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+		box-shadow:
+			0 0 25px -5px var(--accent),
+			0 4px 12px rgba(0, 0, 0, 0.3);
+	}
+</style>
