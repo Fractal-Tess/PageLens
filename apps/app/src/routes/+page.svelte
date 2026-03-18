@@ -1,4 +1,6 @@
 <script lang="ts">
+	const tagCap = 3;
+
 	const modes = [
 		{
 			id: '01',
@@ -145,16 +147,16 @@
 
 						<!-- Tags -->
 						<div class="flex flex-wrap gap-1 mb-2">
-							{#each mode.tags.slice(0, hero ? 6 : 3) as tag}
+							{#each mode.tags.slice(0, tagCap) as tag}
 								<span
 									class="border border-border/40 px-2 py-0.5 text-[11px] tracking-widest text-muted-foreground/35 uppercase transition-colors duration-200 group-hover:border-border group-hover:text-muted-foreground/60"
 								>
 									{tag}
 								</span>
 							{/each}
-							{#if mode.tags.length > (hero ? 6 : 3)}
+							{#if mode.tags.length > tagCap}
 								<span class="text-[11px] text-muted-foreground/25 self-center">
-									+{mode.tags.length - (hero ? 6 : 3)}
+									+{mode.tags.length - tagCap}
 								</span>
 							{/if}
 						</div>
