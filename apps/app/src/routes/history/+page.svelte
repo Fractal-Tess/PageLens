@@ -64,13 +64,13 @@
 	<title>HISTORY — PAGELENS</title>
 </svelte:head>
 
-<div class="mx-auto max-w-6xl px-6 py-10">
-	<div class="mb-10 flex items-end justify-between">
+<div class="mx-auto max-w-6xl px-6 py-8">
+	<div class="animate-fade-in mb-6 flex items-end justify-between">
 		<div>
-			<div class="mb-2 text-xs tracking-[0.3em] text-muted-foreground uppercase">
+			<div class="mb-1 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">
 				Analysis history
 			</div>
-			<h1 class="text-4xl font-bold leading-none">PAST RUNS</h1>
+			<h1 class="text-3xl font-black leading-none tracking-tighter">PAST RUNS</h1>
 		</div>
 		<Button
 			href="/"
@@ -105,7 +105,7 @@
 			</div>
 		</div>
 	{:else}
-		<div class="border border-border">
+		<div class="animate-fade-in-up stagger-1 border border-border">
 			<!-- Table header -->
 			<div class="grid grid-cols-[1fr_110px_80px_80px_64px_64px_160px_80px] border-b border-border bg-secondary/50 px-4 py-2 text-xs font-bold tracking-widest text-muted-foreground uppercase">
 				<div>URL / Label</div>

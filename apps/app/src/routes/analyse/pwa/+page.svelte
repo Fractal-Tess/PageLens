@@ -64,28 +64,27 @@
 	<title>PAGELENS — PWA Analyzer</title>
 </svelte:head>
 
-<div class="mx-auto max-w-6xl px-6 py-16">
-	<div class="mb-12 flex items-center gap-2 text-[10px] tracking-widest text-muted-foreground uppercase">
+<div class="mx-auto max-w-6xl px-6 py-8">
+	<div class="animate-fade-in mb-6 flex items-center gap-2 text-[10px] tracking-widest text-muted-foreground uppercase">
 		<a href="/" class="transition-colors hover:text-foreground">PAGELENS</a>
 		<span class="text-border">/</span>
 		<span class="text-primary">PWA ANALYZER</span>
 	</div>
 
-	<div class="mb-10 grid grid-cols-1 gap-px bg-border md:grid-cols-[2fr_1fr]">
-		<div class="bg-background p-8">
-			<div class="mb-4 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">05 · Analysis mode</div>
-			<h1 class="text-5xl font-black leading-none tracking-tighter md:text-6xl">
-				PWA<br />
-				<span class="text-primary">ANALYZER</span>
+	<div class="animate-fade-in-up stagger-1 mb-8 grid grid-cols-1 gap-px bg-border md:grid-cols-[2fr_1fr]">
+		<div class="bg-background p-5 md:p-6">
+			<div class="mb-2 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">05 · Analysis mode</div>
+			<h1 class="text-3xl font-black leading-none tracking-tighter md:text-4xl">
+				PWA <span class="text-primary">ANALYZER</span>
 			</h1>
-			<p class="mt-5 max-w-sm text-xs leading-relaxed text-muted-foreground">
+			<p class="mt-3 max-w-sm text-xs leading-relaxed text-muted-foreground">
 				Inspect installability signals and PWA readiness: manifest, service worker hints,
 				theme metadata, and touch icon coverage.
 			</p>
 		</div>
-		<div class="bg-background p-8">
-			<div class="mb-5 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">Checks</div>
-			<div class="space-y-2.5">
+		<div class="bg-background p-5 md:p-6">
+			<div class="mb-3 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">Checks</div>
+			<div class="space-y-1.5">
 				{#each ['Web app manifest link and fetch', 'Manifest metadata and icon count', 'Service worker registration hints', 'Theme-color meta declaration', 'iOS touch icon coverage'] as item}
 					<div class="flex items-baseline gap-2 text-[11px] text-muted-foreground">
 						<span class="shrink-0 text-primary/60">—</span>
@@ -96,7 +95,7 @@
 		</div>
 	</div>
 
-	<form onsubmit={handleSubmit} class="mb-10">
+	<form onsubmit={handleSubmit} class="animate-fade-in-up stagger-2 mb-8">
 		<div class="border border-border bg-background p-8">
 			<div class="mb-1 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">Target URL</div>
 			<p class="mb-6 text-xs text-muted-foreground">Analyze a page for PWA readiness and installability indicators.</p>
