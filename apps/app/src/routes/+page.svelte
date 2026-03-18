@@ -60,7 +60,7 @@
 <div class="relative z-10 h-[calc(100svh-5.5rem)] flex flex-col items-center justify-center px-6 py-8">
 	<div class="w-full max-w-[1100px]">
 		<!-- Slim Header -->
-		<header class="flex items-end justify-between mb-6 pb-4 border-b border-border/30">
+		<header class="animate-fade-in flex items-end justify-between mb-6 pb-4 border-b border-border/30">
 			<div class="flex items-baseline gap-4">
 				<h1 class="text-3xl md:text-4xl font-black tracking-tighter leading-none">
 					PAGE<span class="text-primary">LENS</span>
@@ -86,7 +86,7 @@
 				{@const wide = i === 4}
 				<a
 					href={mode.href}
-					class="card-glow group relative overflow-hidden bg-background/60 border border-border/50 backdrop-blur-sm transition-all duration-200 hover:-translate-y-0.5
+					class="card-glow animate-fade-in-up stagger-{i + 1} group relative overflow-hidden bg-background/60 border border-border/50 backdrop-blur-sm transition-all duration-200 hover:-translate-y-0.5
 						{hero ? 'md:col-span-2 md:row-span-2' : ''}
 						{wide ? 'xl:col-span-2' : ''}"
 					style="--accent: {mode.accent};"
@@ -147,20 +147,20 @@
 						<div class="flex flex-wrap gap-1.5 mb-3">
 							{#each mode.tags.slice(0, hero ? 6 : 3) as tag}
 								<span
-									class="border border-border/40 px-2 py-0.5 text-[8px] tracking-widest text-muted-foreground/35 uppercase transition-colors duration-200 group-hover:border-border group-hover:text-muted-foreground/60"
+									class="border border-border/40 px-2 py-0.5 text-[11px] tracking-widest text-muted-foreground/35 uppercase transition-colors duration-200 group-hover:border-border group-hover:text-muted-foreground/60"
 								>
 									{tag}
 								</span>
 							{/each}
 							{#if mode.tags.length > (hero ? 6 : 3)}
-								<span class="text-[8px] text-muted-foreground/25 self-center">
+								<span class="text-[11px] text-muted-foreground/25 self-center">
 									+{mode.tags.length - (hero ? 6 : 3)}
 								</span>
 							{/if}
 						</div>
 
 						<!-- Meta -->
-						<div class="text-[9px] tracking-wider text-muted-foreground/30 uppercase">
+						<div class="text-[11px] tracking-wider text-muted-foreground/30 uppercase">
 							{mode.meta}
 						</div>
 					</div>
