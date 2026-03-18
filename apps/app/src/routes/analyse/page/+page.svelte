@@ -48,34 +48,34 @@
 	<title>PAGELENS — Single Page Analysis</title>
 </svelte:head>
 
-<div class="mx-auto max-w-6xl px-6 py-16">
+<div class="mx-auto max-w-6xl px-6 py-8">
 
 	<!-- Breadcrumb -->
-	<div class="mb-12 flex items-center gap-2 text-[10px] tracking-widest text-muted-foreground uppercase">
+	<div class="animate-fade-in mb-6 flex items-center gap-2 text-[10px] tracking-widest text-muted-foreground uppercase">
 		<a href="/" class="transition-colors hover:text-foreground">PAGELENS</a>
 		<span class="text-border">/</span>
 		<span class="text-primary">SINGLE PAGE</span>
 	</div>
 
 	<!-- Header block -->
-	<div class="mb-10 grid grid-cols-1 gap-px bg-border md:grid-cols-[2fr_1fr]">
-		<div class="bg-background p-8">
-			<div class="mb-4 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">
+	<div class="animate-fade-in-up stagger-1 mb-8 grid grid-cols-1 gap-px bg-border md:grid-cols-[2fr_1fr]">
+		<div class="bg-background p-5 md:p-6">
+			<div class="mb-2 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">
 				01 · Analysis mode
 			</div>
-			<h1 class="text-5xl font-black leading-none tracking-tighter md:text-6xl">
-				SINGLE<br />PAGE<br /><span class="text-primary">ANALYSIS</span>
+			<h1 class="text-3xl font-black leading-none tracking-tighter md:text-4xl">
+				SINGLE PAGE <span class="text-primary">ANALYSIS</span>
 			</h1>
-			<p class="mt-5 max-w-sm text-xs leading-relaxed text-muted-foreground">
+			<p class="mt-3 max-w-sm text-xs leading-relaxed text-muted-foreground">
 				Loads the target URL in a headless browser and captures all available data:
 				performance vitals, full SEO report, DOM structure, network timings, assets, and detected issues.
 			</p>
 		</div>
-		<div class="bg-background p-8">
-			<div class="mb-5 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">
+		<div class="bg-background p-5 md:p-6">
+			<div class="mb-3 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">
 				What's captured
 			</div>
-			<div class="space-y-2.5">
+			<div class="space-y-1.5">
 				{#each [
 					'Performance vitals (TTFB, FCP, LCP)',
 					'SEO score & metadata',
@@ -98,7 +98,7 @@
 	</div>
 
 	<!-- Form -->
-	<form onsubmit={handleSubmit} class="mb-10">
+	<form onsubmit={handleSubmit} class="animate-fade-in-up stagger-2 mb-8">
 		<div class="border border-border bg-background p-8">
 			<div class="mb-1 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">
 				Target URL
@@ -134,25 +134,15 @@
 	</form>
 
 	<!-- Output metrics grid -->
-	<div class="mb-3 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">
+	<div class="animate-fade-in-up stagger-3 mb-3 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">
 		Output metrics
 	</div>
-	<div class="grid grid-cols-2 gap-px bg-border md:grid-cols-4">
+	<div class="animate-fade-in-up stagger-3 grid grid-cols-2 gap-px bg-border md:grid-cols-4">
 		{#each outputMetrics as m}
 			<div class="bg-background p-5">
 				<div class="mb-1.5 text-[10px] font-bold tracking-widest text-primary uppercase">{m.label}</div>
 				<div class="text-[10px] leading-relaxed text-muted-foreground">{m.desc}</div>
 			</div>
 		{/each}
-	</div>
-
-	<!-- Bottom nav -->
-	<div class="mt-px flex items-center justify-between border border-border bg-background px-6 py-3.5">
-		<a href="/" class="text-[10px] tracking-widest text-muted-foreground uppercase transition-colors hover:text-foreground">
-			← ALL MODES
-		</a>
-		<a href="/analyse/crawl" class="text-[10px] tracking-widest text-primary uppercase transition-colors hover:text-primary/80">
-			FULL CRAWL →
-		</a>
 	</div>
 </div>

@@ -64,28 +64,27 @@
 	<title>PAGELENS — PWA Analyzer</title>
 </svelte:head>
 
-<div class="mx-auto max-w-6xl px-6 py-16">
-	<div class="mb-12 flex items-center gap-2 text-[10px] tracking-widest text-muted-foreground uppercase">
+<div class="mx-auto max-w-6xl px-6 py-8">
+	<div class="animate-fade-in mb-6 flex items-center gap-2 text-xs tracking-widest text-muted-foreground uppercase">
 		<a href="/" class="transition-colors hover:text-foreground">PAGELENS</a>
 		<span class="text-border">/</span>
 		<span class="text-primary">PWA ANALYZER</span>
 	</div>
 
-	<div class="mb-10 grid grid-cols-1 gap-px bg-border md:grid-cols-[2fr_1fr]">
-		<div class="bg-background p-8">
-			<div class="mb-4 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">05 · Analysis mode</div>
-			<h1 class="text-5xl font-black leading-none tracking-tighter md:text-6xl">
-				PWA<br />
-				<span class="text-primary">ANALYZER</span>
+	<div class="animate-fade-in-up stagger-1 mb-8 grid grid-cols-1 gap-px bg-border md:grid-cols-[2fr_1fr]">
+		<div class="bg-background p-5 md:p-6">
+			<div class="mb-2 text-xs tracking-[0.4em] text-muted-foreground uppercase">05 · Analysis mode</div>
+			<h1 class="text-3xl font-black leading-none tracking-tighter md:text-4xl">
+				PWA <span class="text-primary">ANALYZER</span>
 			</h1>
-			<p class="mt-5 max-w-sm text-xs leading-relaxed text-muted-foreground">
+			<p class="mt-3 max-w-sm text-xs leading-relaxed text-muted-foreground">
 				Inspect installability signals and PWA readiness: manifest, service worker hints,
 				theme metadata, and touch icon coverage.
 			</p>
 		</div>
-		<div class="bg-background p-8">
-			<div class="mb-5 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">Checks</div>
-			<div class="space-y-2.5">
+		<div class="bg-background p-5 md:p-6">
+			<div class="mb-3 text-xs tracking-[0.4em] text-muted-foreground uppercase">Checks</div>
+			<div class="space-y-1.5">
 				{#each ['Web app manifest link and fetch', 'Manifest metadata and icon count', 'Service worker registration hints', 'Theme-color meta declaration', 'iOS touch icon coverage'] as item}
 					<div class="flex items-baseline gap-2 text-[11px] text-muted-foreground">
 						<span class="shrink-0 text-primary/60">—</span>
@@ -96,9 +95,9 @@
 		</div>
 	</div>
 
-	<form onsubmit={handleSubmit} class="mb-10">
+	<form onsubmit={handleSubmit} class="animate-fade-in-up stagger-2 mb-8">
 		<div class="border border-border bg-background p-8">
-			<div class="mb-1 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">Target URL</div>
+			<div class="mb-1 text-xs tracking-[0.4em] text-muted-foreground uppercase">Target URL</div>
 			<p class="mb-6 text-xs text-muted-foreground">Analyze a page for PWA readiness and installability indicators.</p>
 
 			<div class="flex gap-0">
@@ -126,41 +125,41 @@
 	</form>
 
 	{#if result}
-		<div class="mb-3 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">PWA score</div>
+		<div class="mb-3 text-xs tracking-[0.4em] text-muted-foreground uppercase">PWA score</div>
 		<div class="mb-6 grid grid-cols-2 gap-px bg-border md:grid-cols-5">
 			<div class="bg-background p-5">
-				<div class="mb-1 text-[10px] tracking-widest text-muted-foreground uppercase">Installability</div>
+				<div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">Installability</div>
 				<div class="font-mono text-2xl font-black {result.installability_score >= 70 ? 'text-green-400' : result.installability_score >= 40 ? 'text-yellow-300' : 'text-destructive'}">{result.installability_score}</div>
 			</div>
 			<div class="bg-background p-5">
-				<div class="mb-1 text-[10px] tracking-widest text-muted-foreground uppercase">Manifest</div>
+				<div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">Manifest</div>
 				<div class="font-mono text-xs uppercase">{result.has_manifest ? 'Yes' : 'No'}</div>
 			</div>
 			<div class="bg-background p-5">
-				<div class="mb-1 text-[10px] tracking-widest text-muted-foreground uppercase">Service Worker</div>
+				<div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">Service Worker</div>
 				<div class="font-mono text-xs uppercase">{result.has_service_worker_registration ? 'Detected' : 'Not detected'}</div>
 			</div>
 			<div class="bg-background p-5">
-				<div class="mb-1 text-[10px] tracking-widest text-muted-foreground uppercase">Theme Color</div>
+				<div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">Theme Color</div>
 				<div class="font-mono text-xs uppercase">{result.has_theme_color_meta ? 'Present' : 'Missing'}</div>
 			</div>
 			<div class="bg-background p-5">
-				<div class="mb-1 text-[10px] tracking-widest text-muted-foreground uppercase">Touch Icons</div>
+				<div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">Touch Icons</div>
 				<div class="font-mono text-xs">{result.apple_touch_icon_count}</div>
 			</div>
 		</div>
 
 		{#if result.manifest}
-			<div class="mb-3 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">Manifest details</div>
+			<div class="mb-3 text-xs tracking-[0.4em] text-muted-foreground uppercase">Manifest details</div>
 			<div class="mb-6 grid grid-cols-1 gap-px bg-border md:grid-cols-2 lg:grid-cols-4">
-				<div class="bg-background p-4"><div class="mb-1 text-[10px] tracking-widest text-muted-foreground uppercase">Name</div><div class="font-mono text-xs">{result.manifest.name ?? '—'}</div></div>
-				<div class="bg-background p-4"><div class="mb-1 text-[10px] tracking-widest text-muted-foreground uppercase">Short name</div><div class="font-mono text-xs">{result.manifest.short_name ?? '—'}</div></div>
-				<div class="bg-background p-4"><div class="mb-1 text-[10px] tracking-widest text-muted-foreground uppercase">Display</div><div class="font-mono text-xs uppercase">{result.manifest.display ?? '—'}</div></div>
-				<div class="bg-background p-4"><div class="mb-1 text-[10px] tracking-widest text-muted-foreground uppercase">Icons</div><div class="font-mono text-xs">{result.manifest.icon_count}</div></div>
+				<div class="bg-background p-4"><div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">Name</div><div class="font-mono text-xs">{result.manifest.name ?? '—'}</div></div>
+				<div class="bg-background p-4"><div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">Short name</div><div class="font-mono text-xs">{result.manifest.short_name ?? '—'}</div></div>
+				<div class="bg-background p-4"><div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">Display</div><div class="font-mono text-xs uppercase">{result.manifest.display ?? '—'}</div></div>
+				<div class="bg-background p-4"><div class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">Icons</div><div class="font-mono text-xs">{result.manifest.icon_count}</div></div>
 			</div>
 		{/if}
 
-		<div class="mb-3 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">Recommendations</div>
+		<div class="mb-3 text-xs tracking-[0.4em] text-muted-foreground uppercase">Recommendations</div>
 		<div class="border border-border bg-background px-4 py-3 text-xs">
 			{#if recommendations.length > 0}
 				<div class="space-y-1.5 text-muted-foreground">
@@ -175,7 +174,7 @@
 
 		{#if result.warnings.length > 0}
 			<div class="mt-6 border border-yellow-500/40 bg-yellow-500/10 px-4 py-3">
-				<div class="mb-2 text-[10px] tracking-widest text-yellow-300 uppercase">Warnings</div>
+				<div class="mb-2 text-xs tracking-widest text-yellow-300 uppercase">Warnings</div>
 				<div class="space-y-1.5 text-xs text-yellow-200/90">
 					{#each result.warnings as warning}
 						<div>• {warning}</div>
@@ -184,9 +183,4 @@
 			</div>
 		{/if}
 	{/if}
-
-	<div class="mt-px flex items-center justify-between border border-border bg-background px-6 py-3.5">
-		<a href="/analyse/favicon" class="text-[10px] tracking-widest text-muted-foreground uppercase transition-colors hover:text-foreground">← FAVICON ANALYZER</a>
-		<a href="/" class="text-[10px] tracking-widest text-primary uppercase transition-colors hover:text-primary/80">ALL MODES →</a>
-	</div>
 </div>

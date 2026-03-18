@@ -56,34 +56,34 @@
 	<title>PAGELENS — Full Site Crawl</title>
 </svelte:head>
 
-<div class="mx-auto max-w-6xl px-6 py-16">
+<div class="mx-auto max-w-6xl px-6 py-8">
 
 	<!-- Breadcrumb -->
-	<div class="mb-12 flex items-center gap-2 text-[10px] tracking-widest text-muted-foreground uppercase">
+	<div class="animate-fade-in mb-6 flex items-center gap-2 text-[10px] tracking-widest text-muted-foreground uppercase">
 		<a href="/" class="transition-colors hover:text-foreground">PAGELENS</a>
 		<span class="text-border">/</span>
 		<span class="text-primary">FULL CRAWL</span>
 	</div>
 
 	<!-- Header block -->
-	<div class="mb-10 grid grid-cols-1 gap-px bg-border md:grid-cols-[2fr_1fr]">
-		<div class="bg-background p-8">
-			<div class="mb-4 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">
+	<div class="animate-fade-in-up stagger-1 mb-8 grid grid-cols-1 gap-px bg-border md:grid-cols-[2fr_1fr]">
+		<div class="bg-background p-5 md:p-6">
+			<div class="mb-2 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">
 				02 · Analysis mode
 			</div>
-			<h1 class="text-5xl font-black leading-none tracking-tighter md:text-6xl">
-				FULL<br />SITE<br /><span class="text-primary">CRAWL</span>
+			<h1 class="text-3xl font-black leading-none tracking-tighter md:text-4xl">
+				FULL SITE <span class="text-primary">CRAWL</span>
 			</h1>
-			<p class="mt-5 max-w-sm text-xs leading-relaxed text-muted-foreground">
+			<p class="mt-3 max-w-sm text-xs leading-relaxed text-muted-foreground">
 				Starts from the seed URL and follows all internal links, building a complete map of your site.
 				Each discovered page is fully analysed — same depth as single-page mode, at scale.
 			</p>
 		</div>
-		<div class="bg-background p-8">
-			<div class="mb-5 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">
+		<div class="bg-background p-5 md:p-6">
+			<div class="mb-3 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">
 				How it works
 			</div>
-			<div class="space-y-4">
+			<div class="space-y-3">
 				<div class="border-l border-primary/40 pl-4">
 					<div class="mb-1 text-[10px] font-bold tracking-widest text-primary uppercase">1. Seed</div>
 					<div class="text-[11px] leading-relaxed text-muted-foreground">
@@ -113,7 +113,7 @@
 	</div>
 
 	<!-- Form -->
-	<form onsubmit={handleSubmit} class="mb-10">
+	<form onsubmit={handleSubmit} class="animate-fade-in-up stagger-2 mb-8">
 		<div class="border border-border bg-background p-8">
 			<div class="mb-1 text-[10px] tracking-[0.4em] text-muted-foreground uppercase">
 				Seed URL
@@ -204,15 +204,5 @@
 				<div class="text-[10px] leading-relaxed text-muted-foreground">{m.desc}</div>
 			</div>
 		{/each}
-	</div>
-
-	<!-- Bottom nav -->
-	<div class="mt-px flex items-center justify-between border border-border bg-background px-6 py-3.5">
-		<a href="/analyse/page" class="text-[10px] tracking-widest text-muted-foreground uppercase transition-colors hover:text-foreground">
-			← SINGLE PAGE
-		</a>
-		<a href="/analyse/benchmark" class="text-[10px] tracking-widest text-primary uppercase transition-colors hover:text-primary/80">
-			HTTP BENCHMARK →
-		</a>
 	</div>
 </div>
