@@ -183,9 +183,4 @@
 			</div>
 		{/if}
 	{/if}
-
-	<div class="mt-px flex items-center justify-between border border-border bg-background px-6 py-3.5">
-		<a href="/analyse/favicon" class="text-[10px] tracking-widest text-muted-foreground uppercase transition-colors hover:text-foreground">← FAVICON ANALYZER</a>
-		<a href="/" class="text-[10px] tracking-widest text-primary uppercase transition-colors hover:text-primary/80">ALL MODES →</a>
-	</div>
 </div>

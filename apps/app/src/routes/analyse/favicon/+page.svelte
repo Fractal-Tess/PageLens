@@ -457,10 +457,4 @@
 			</div>
 		{/if}
 	{/if}
-
-	<div class="mt-px flex items-center justify-start border border-border bg-background px-6 py-3.5">
-		<a href="/analyse/benchmark" class="text-[10px] tracking-widest text-muted-foreground uppercase transition-colors hover:text-foreground">
-			← HTTP BENCHMARK
-		</a>
-	</div>
 </div>

@@ -145,14 +145,4 @@
 			</div>
 		{/each}
 	</div>
-
-	<!-- Bottom nav -->
-	<div class="mt-px flex items-center justify-between border border-border bg-background px-6 py-3.5">
-		<a href="/" class="text-[10px] tracking-widest text-muted-foreground uppercase transition-colors hover:text-foreground">
-			← ALL MODES
-		</a>
-		<a href="/analyse/crawl" class="text-[10px] tracking-widest text-primary uppercase transition-colors hover:text-primary/80">
-			FULL CRAWL →
-		</a>
-	</div>
 </div>

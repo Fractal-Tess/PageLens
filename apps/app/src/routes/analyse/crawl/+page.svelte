@@ -205,14 +205,4 @@
 			</div>
 		{/each}
 	</div>
-
-	<!-- Bottom nav -->
-	<div class="mt-px flex items-center justify-between border border-border bg-background px-6 py-3.5">
-		<a href="/analyse/page" class="text-[10px] tracking-widest text-muted-foreground uppercase transition-colors hover:text-foreground">
-			← SINGLE PAGE
-		</a>
-		<a href="/analyse/benchmark" class="text-[10px] tracking-widest text-primary uppercase transition-colors hover:text-primary/80">
-			HTTP BENCHMARK →
-		</a>
-	</div>
 </div>

@@ -105,13 +105,13 @@
 
 					<div
 						class="relative h-full flex flex-col {hero
-							? 'p-6 xl:p-8 pl-6 xl:pl-9'
-							: 'p-5 pl-6'}"
+							? 'p-4 xl:p-6 pl-5 xl:pl-7'
+							: 'p-3.5 pl-5'}"
 					>
 						<!-- ID + arrow -->
-						<div class="flex items-center justify-between mb-3">
+						<div class="flex items-center justify-between mb-2">
 							<span
-								class="inline-flex items-center justify-center w-7 h-7 text-[10px] font-bold border tracking-wider"
+								class="inline-flex items-center justify-center w-6 h-6 text-[9px] font-bold border tracking-wider"
 								style="border-color: var(--accent); color: var(--accent);"
 							>
 								{mode.id}
@@ -126,8 +126,8 @@
 						<!-- Title -->
 						<h2
 							class="{hero
-								? 'text-lg xl:text-3xl xl:mb-3'
-								: 'text-lg'} font-black tracking-tight mb-2 transition-colors duration-200 group-hover:text-[var(--accent)]"
+								? 'text-base xl:text-2xl xl:mb-2'
+								: 'text-base'} font-black tracking-tight mb-1.5 transition-colors duration-200 group-hover:text-[var(--accent)]"
 						>
 							{mode.title}<span class="font-light opacity-50 ml-2">{mode.subtitle}</span>
 						</h2>
@@ -135,8 +135,8 @@
 						<!-- Desc -->
 						<p
 							class="{hero
-								? 'xl:text-sm'
-								: 'text-xs line-clamp-2'} text-xs leading-relaxed text-muted-foreground/50 mb-4"
+								? 'xl:text-xs'
+								: 'text-[11px] line-clamp-2'} text-[11px] leading-relaxed text-muted-foreground/50 mb-3"
 						>
 							{mode.desc}
 						</p>
@@ -144,7 +144,7 @@
 						<div class="flex-1"></div>
 
 						<!-- Tags -->
-						<div class="flex flex-wrap gap-1.5 mb-3">
+						<div class="flex flex-wrap gap-1 mb-2">
 							{#each mode.tags.slice(0, hero ? 6 : 3) as tag}
 								<span
 									class="border border-border/40 px-2 py-0.5 text-[11px] tracking-widest text-muted-foreground/35 uppercase transition-colors duration-200 group-hover:border-border group-hover:text-muted-foreground/60"
@@ -185,6 +185,6 @@
 	}
 
 	.bento-grid {
-		grid-auto-rows: minmax(140px, auto);
+		grid-auto-rows: minmax(110px, auto);
 	}
 </style>
