@@ -57,8 +57,8 @@
 	<title>PAGELENS — Web Analysis</title>
 </svelte:head>
 
-<div class="relative z-10 h-[calc(100svh-5.5rem)] flex flex-col items-center justify-center px-6 py-8">
-	<div class="w-full max-w-[1100px]">
+<div class="relative z-10 h-[calc(100svh-5.5rem)] flex flex-col px-6 overflow-y-auto">
+	<div class="w-full max-w-[1100px] m-auto">
 		<!-- Slim Header -->
 		<header class="animate-fade-in flex items-end justify-between mb-6 pb-4 border-b border-border/30">
 			<div class="flex items-baseline gap-4">
@@ -185,6 +185,6 @@
 	}
 
 	.bento-grid {
-		grid-auto-rows: minmax(170px, auto);
+		grid-auto-rows: minmax(140px, auto);
 	}
 </style>
