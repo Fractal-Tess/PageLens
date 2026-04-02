@@ -15,6 +15,7 @@
     "@pagelens/ui": "workspace:*",
     "postprocessing": "^6.38.3",
     "shiki": "^4.0.1",
+    "svelte-component-to-image": "^2.0.5",
     "three": "^0.183.2",
     "zod": "^4.3.6"
   },
