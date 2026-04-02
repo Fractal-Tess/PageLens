@@ -88,21 +88,21 @@
 				{@const wide = i === 4}
 				<a
 					href={mode.href}
-					class="card-glow animate-fade-in-up stagger-{i + 1} group relative overflow-hidden bg-background/60 border border-border/50 backdrop-blur-sm transition-all duration-200 hover:-translate-y-0.5
+					class="animate-fade-in-up stagger-{i + 1} group relative overflow-hidden border border-border bg-[oklch(0.11_0_0)] transition-colors duration-200 hover:bg-card
 						{hero ? 'md:col-span-2 md:row-span-2' : ''}
 						{wide ? 'xl:col-span-2' : ''}"
 					style="--accent: {mode.accent};"
 				>
-					<!-- Accent wash -->
-					<div
-						class="absolute inset-0 opacity-[0.03] group-hover:opacity-[0.07] transition-opacity duration-300 pointer-events-none"
-						style="background: linear-gradient(135deg, var(--accent), transparent 60%);"
-					></div>
-
 					<!-- Left rail -->
 					<div
-						class="absolute left-0 top-0 bottom-0 w-[3px] transition-all duration-200 group-hover:w-[5px]"
-						style="background: var(--accent); box-shadow: 0 0 8px var(--accent);"
+						class="absolute left-0 top-0 bottom-0 w-[3px] opacity-50 transition-opacity duration-200 group-hover:opacity-100"
+						style="background: var(--accent); box-shadow: 0 0 12px var(--accent);"
+					></div>
+
+					<!-- Corner glow -->
+					<div
+						class="pointer-events-none absolute -bottom-[30px] -left-[20px] h-20 w-20 rounded-full opacity-0 blur-[20px] transition-opacity duration-300 group-hover:opacity-100"
+						style="background: radial-gradient(circle, {mode.accent} 0%, transparent 70%);"
 					></div>
 
 					<div
@@ -173,19 +173,6 @@
 </div>
 
 <style>
-	.card-glow {
-		transition:
-			border-color 0.2s,
-			box-shadow 0.2s,
-			transform 0.2s;
-	}
-	.card-glow:hover {
-		border-color: color-mix(in srgb, var(--accent) 35%, transparent);
-		box-shadow:
-			0 0 25px -5px var(--accent),
-			0 4px 12px rgba(0, 0, 0, 0.3);
-	}
-
 	.bento-grid {
 		grid-auto-rows: minmax(110px, auto);
 	}
